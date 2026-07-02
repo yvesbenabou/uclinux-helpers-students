@@ -226,16 +226,23 @@ run_with_log() {
     local rc
     shift
     info "Exécution : $*"
-    set +e
     if ((QUIET)); then
-        "$@" >"$logfile" 2>&1
-        rc=$?
+        if "$@" >"$logfile" 2>&1; then
+            rc=0
+        else
+            rc=$?
+        fi
     else
-        "$@" 2>&1 | tee "$logfile"
-        rc=${PIPESTATUS[0]}
+        if "$@" 2>&1 | tee "$logfile"; then
+            rc=0
+        else
+            rc=${PIPESTATUS[0]}
+        fi
     fi
-    set -e
     if ((rc != 0)); then
+        if [[ -f "$logfile" ]] && grep -q 'LIBUSB_ERROR_ACCESS' "$logfile"; then
+            stlink_permission_help
+        fi
         debug_exit "$__fn" "$rc"
         die "commande en échec (code $rc), voir $logfile"
     fi
@@ -304,6 +311,25 @@ prepare_linux_override() {
     fi
     printf 'LINUX_OVERRIDE_SRCDIR = %s\n' "$source_dir" >> "$local_mk"
     ok "Buildroot utilisera Linux $version depuis $source_dir"
+    debug_exit "$__fn" 0
+}
+
+stlink_permission_help() {
+    local __fn="${FUNCNAME[0]}"
+    debug_enter "$__fn"
+    local rules="$STM32_OUT/host/share/openocd/contrib/60-openocd.rules"
+
+    warn "OpenOCD voit le ST-LINK mais libusb n'a pas le droit de l'ouvrir."
+    if [[ -f "$rules" ]]; then
+        warn "Installez les règles udev OpenOCD standard puis débranchez/rebranchez le ST-LINK :"
+        printf '  sudo install -m 0644 %q /etc/udev/rules.d/60-openocd.rules\n' "$rules"
+        printf '  sudo udevadm control --reload-rules\n'
+        printf '  sudo udevadm trigger --subsystem-match=usb\n'
+        printf '  sudo usermod -aG plugdev %q   # puis nouvelle session si nécessaire\n' "${USER:-${LOGNAME:-utilisateur}}"
+    else
+        warn "règles udev OpenOCD introuvables : $rules"
+        warn "Installez les règles udev OpenOCD du paquet/distribution, puis reconnectez le ST-LINK."
+    fi
     debug_exit "$__fn" 0
 }
 
