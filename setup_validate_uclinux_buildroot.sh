@@ -7,22 +7,17 @@
 #
 # Utilisation :
 #   ./setup_validate_uclinux_buildroot.sh
-#       Installation + configuration + builds complets STM32/QEMU + test QEMU.
+#       Installation + configuration + builds complets STM32/QEMU.
+#       Le démarrage QEMU se fait ensuite avec ./run_qemu_image.sh.
 #
 #   ./setup_validate_uclinux_buildroot.sh --quick
 #       Installation + configuration + contrôles, sans compilation complète.
-#
-#   ./setup_validate_uclinux_buildroot.sh --probe-stlink
-#       Même validation complète, puis détection de la carte par OpenOCD,
-#       sans écrire dans la Flash.
 #
 # Options :
 #   --root CHEMIN              Racine de travail (défaut : $HOME/uclinux)
 #   --jobs N                   Nombre de compilations parallèles
 #   --skip-apt                 Ne pas installer les paquets Ubuntu
 #   --quick                    Ne pas lancer les builds complets
-#   --skip-qemu-test           Construire QEMU sans lancer le test de démarrage
-#   --probe-stlink             Tester ST-LINK/OpenOCD sans flasher
 #   --allow-other-release      Accepter une version Ubuntu autre que 24.04
 #   --quiet                    Masquer la sortie verbeuse des commandes longues
 #   --debug                    Tracer l'entrée et la sortie des fonctions
@@ -35,6 +30,10 @@
 set -Eeuo pipefail
 umask 022
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=uclinux_common.sh
+source "$SCRIPT_DIR/uclinux_common.sh"
+
 BUILDROOT_REF="2025.08"
 EXPECTED_LINUX_VERSION="6.1.133"
 LINUX_STABLE_GIT_URL="https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git"
@@ -42,8 +41,6 @@ WORK_ROOT="${HOME}/uclinux"
 JOBS="$(nproc 2>/dev/null || echo 2)"
 SKIP_APT=0
 QUICK=0
-SKIP_QEMU_TEST=0
-PROBE_STLINK=0
 ALLOW_OTHER_RELEASE=0
 QUIET=0
 DEBUG_TRACE=0
@@ -56,22 +53,17 @@ Préparation et validation de l’environnement du cours uClinux/Buildroot.
 
 Utilisation :
   ./setup_validate_uclinux_buildroot.sh
-      Installation + configuration + builds complets STM32/QEMU + test QEMU.
+      Installation + configuration + builds complets STM32/QEMU.
+      Le démarrage QEMU se fait ensuite avec ./run_qemu_image.sh.
 
   ./setup_validate_uclinux_buildroot.sh --quick
       Installation + configuration + contrôles, sans compilation complète.
-
-  ./setup_validate_uclinux_buildroot.sh --probe-stlink
-      Même validation complète, puis détection de la carte par OpenOCD,
-      sans écrire dans la Flash.
 
 Options :
   --root CHEMIN              Racine de travail (défaut : $HOME/uclinux)
   --jobs N                   Nombre de compilations parallèles
   --skip-apt                 Ne pas installer les paquets Ubuntu
   --quick                    Ne pas lancer les builds complets
-  --skip-qemu-test           Construire QEMU sans lancer le test de démarrage
-  --probe-stlink             Tester ST-LINK/OpenOCD sans flasher
   --allow-other-release      Accepter une version Ubuntu autre que 24.04
   --quiet                    Masquer la sortie verbeuse des commandes longues
   --debug                    Tracer l'entrée et la sortie des fonctions
@@ -100,8 +92,6 @@ while (($#)); do
             ;;
         --skip-apt) SKIP_APT=1; shift ;;
         --quick) QUICK=1; shift ;;
-        --skip-qemu-test) SKIP_QEMU_TEST=1; shift ;;
-        --probe-stlink) PROBE_STLINK=1; shift ;;
         --allow-other-release) ALLOW_OTHER_RELEASE=1; shift ;;
         --quiet) QUIET=1; shift ;;
         --debug) DEBUG_TRACE=1; shift ;;
@@ -120,12 +110,11 @@ while (($#)); do
     esac
 done
 
-WORK_ROOT="$(readlink -m "$WORK_ROOT")"
+WORK_ROOT="$(uclinux_realpath "$WORK_ROOT")"
 BUILDROOT_DIR="$WORK_ROOT/buildroot"
 DOWNLOAD_DIR="$WORK_ROOT/downloads"
-OUTPUT_ROOT="$WORK_ROOT/outputs"
-STM32_OUT="$OUTPUT_ROOT/stm32f429"
-QEMU_OUT="$OUTPUT_ROOT/qemu-vexpress"
+STM32_OUT="$(uclinux_stm32_output_dir "$WORK_ROOT")"
+QEMU_OUT="$(uclinux_qemu_output_dir "$WORK_ROOT")"
 LABS_DIR="$WORK_ROOT/labs"
 DOCS_DIR="$WORK_ROOT/documents"
 LOG_DIR="$WORK_ROOT/logs"
@@ -147,8 +136,8 @@ fi
 debug_trace() {
     ((DEBUG_TRACE)) || return 0
     case "$1" in
-        enter) printf '[DEBUG] entering %s()...\n' "$2" ;;
-        exit)  printf '[DEBUG] exiting %s() (code %s)\n' "$2" "$3" ;;
+        enter) printf '[DEBUG] entrée dans %s()...\n' "$2" ;;
+        exit)  printf '[DEBUG] sortie de %s() (code %s)\n' "$2" "$3" ;;
     esac
 }
 
@@ -233,15 +222,15 @@ run_with_log() {
             rc=$?
         fi
     else
-        if "$@" 2>&1 | tee "$logfile"; then
+        if uclinux_run_logged "$logfile" "$@"; then
             rc=0
         else
-            rc=${PIPESTATUS[0]}
+            rc=$?
         fi
     fi
     if ((rc != 0)); then
         if [[ -f "$logfile" ]] && grep -q 'LIBUSB_ERROR_ACCESS' "$logfile"; then
-            stlink_permission_help
+            uclinux_stlink_permission_help "$(uclinux_openocd_udev_rules "$STM32_OUT")" "${USER:-${LOGNAME:-utilisateur}}"
         fi
         debug_exit "$__fn" "$rc"
         die "commande en échec (code $rc), voir $logfile"
@@ -311,25 +300,6 @@ prepare_linux_override() {
     fi
     printf 'LINUX_OVERRIDE_SRCDIR = %s\n' "$source_dir" >> "$local_mk"
     ok "Buildroot utilisera Linux $version depuis $source_dir"
-    debug_exit "$__fn" 0
-}
-
-stlink_permission_help() {
-    local __fn="${FUNCNAME[0]}"
-    debug_enter "$__fn"
-    local rules="$STM32_OUT/host/share/openocd/contrib/60-openocd.rules"
-
-    warn "OpenOCD voit le ST-LINK mais libusb n'a pas le droit de l'ouvrir."
-    if [[ -f "$rules" ]]; then
-        warn "Installez les règles udev OpenOCD standard puis débranchez/rebranchez le ST-LINK :"
-        printf '  sudo install -m 0644 %q /etc/udev/rules.d/60-openocd.rules\n' "$rules"
-        printf '  sudo udevadm control --reload-rules\n'
-        printf '  sudo udevadm trigger --subsystem-match=usb\n'
-        printf '  sudo usermod -aG plugdev %q   # puis nouvelle session si nécessaire\n' "${USER:-${LOGNAME:-utilisateur}}"
-    else
-        warn "règles udev OpenOCD introuvables : $rules"
-        warn "Installez les règles udev OpenOCD du paquet/distribution, puis reconnectez le ST-LINK."
-    fi
     debug_exit "$__fn" 0
 }
 
@@ -475,8 +445,8 @@ APT_PACKAGES=(
     rsync cpio unzip bzip2 gzip xz-utils tar patch perl bc
     file findutils gawk sed diffutils coreutils
     python3 libncurses-dev bison flex libssl-dev libelf-dev
-    device-tree-compiler qemu-system-arm openocd usbutils
-    openssh-server iproute2 time locales
+    device-tree-compiler usbutils
+    openssh-server iproute2 time locales minicom
 )
 
 if ((SKIP_APT == 0)); then
@@ -492,7 +462,7 @@ else
     warn "installation APT ignorée (--skip-apt)."
 fi
 
-for cmd in gcc g++ make git wget rsync cpio file bc python3 bison flex dtc qemu-system-arm openocd ssh sshd lsusb readelf timeout sha256sum script; do
+for cmd in gcc g++ make git wget rsync cpio file bc python3 bison flex dtc ssh sshd readelf timeout sha256sum script minicom; do
     require_cmd "$cmd"
 done
 ok "outils fondamentaux présents"
@@ -500,9 +470,10 @@ ok "outils fondamentaux présents"
 printf 'gcc       : '; gcc --version | head -n1
 printf 'make      : '; make --version | head -n1
 printf 'git       : '; git --version
-printf 'QEMU      : '; qemu-system-arm --version | head -n1
-printf 'OpenOCD   : '; openocd --version 2>&1 | head -n1
 printf 'DTC       : '; dtc --version
+printf 'Minicom   : '; minicom --version | head -n1
+MINICOM_PROFILE="$(uclinux_create_minicom_acm0_profile)"
+ok "profil minicom créé : minicom acm0 -> /dev/ttyACM0, 115200 8N1 ($MINICOM_PROFILE)"
 
 section "3. Accès SSH depuis l'hôte"
 
@@ -543,6 +514,13 @@ Dans VS Code :
   - installer l'extension « Remote - SSH » ;
   - se connecter à « uclinux-vm » ;
   - ouvrir le dossier ${WORK_ROOT}.
+
+Console série STM32F429I-DISC1 :
+  - PA9 est connecté sur RX du lien USB-TTL
+  - PA10 est connecté sur TX du lien USB-TTL
+  - lancer : minicom acm0
+  - profil généré : $HOME/.minirc.acm0 (/dev/ttyACM0, 115200 8N1)
+  - quitter minicom : Ctrl-A puis X.
 
 Le projet Buildroot doit rester sur le disque Linux de la VM,
 pas dans un dossier partagé VirtualBox.
@@ -711,6 +689,11 @@ mark_step_completed "build-stm32" "$STM32_BUILD_FINGERPRINT"
 printf '\nImages STM32 générées :\n'
 find "$STM32_OUT/images" -maxdepth 1 -type f -printf '  %-38f %10s octets\n' | sort
 
+OPENOCD_STM32_RUNNER="$SCRIPT_DIR/run_openocd_stm32.sh"
+check_file_nonempty "$OPENOCD_STM32_RUNNER"
+info "Pour tester OpenOCD sans flasher : $OPENOCD_STM32_RUNNER probe --root $WORK_ROOT"
+info "Pour flasher la carte : $OPENOCD_STM32_RUNNER flash --root $WORK_ROOT"
+
 section "9. Construction complète QEMU ARM VExpress"
 
 QEMU_BUILD_FINGERPRINT="$(step_fingerprint "$QEMU_OUT")"
@@ -734,61 +717,12 @@ mark_step_completed "build-qemu" "$QEMU_BUILD_FINGERPRINT"
 printf '\nImages QEMU générées :\n'
 find "$QEMU_OUT/images" -maxdepth 1 -type f -printf '  %-38f %10s octets\n' | sort
 
-QEMU_BOOT_OK="non testé"
-if ((SKIP_QEMU_TEST == 0)); then
-    section "10. Test de démarrage QEMU"
-    QEMU_BOOT_LOG="$LOG_DIR/qemu-boot-$TIMESTAMP.log"
-    QEMU_START="$QEMU_OUT/images/start-qemu.sh"
-    check_file_nonempty "$QEMU_START"
+RUN_QEMU_IMAGE="$SCRIPT_DIR/run_qemu_image.sh"
+check_file_nonempty "$RUN_QEMU_IMAGE"
+info "Pour démarrer QEMU : $RUN_QEMU_IMAGE --root $WORK_ROOT"
+info "Pour tester QEMU pendant 10 secondes : $RUN_QEMU_IMAGE --root $WORK_ROOT --timeout 10"
 
-    QEMU_TIMEOUT_CMD=(timeout --signal=TERM --kill-after=5s 90s "$QEMU_START" --serial-only)
-    printf -v QEMU_SCRIPT_CMD '%q ' "${QEMU_TIMEOUT_CMD[@]}"
-    QEMU_CMD=(script -qefc "$QEMU_SCRIPT_CMD" /dev/null)
-    info "Démarrage QEMU via pseudo-terminal ; sortie série aussi enregistrée dans $QEMU_BOOT_LOG"
-    if "${QEMU_CMD[@]}" 2>&1 | tee "$QEMU_BOOT_LOG"; then
-        QEMU_RC=0
-    else
-        QEMU_RC=${PIPESTATUS[0]}
-    fi
-    QEMU_BOOT_BYTES=$(wc -c < "$QEMU_BOOT_LOG" 2>/dev/null || printf '0')
-    info "QEMU terminé : code $QEMU_RC, journal $QEMU_BOOT_BYTES octets"
-
-    if grep -Eqi 'Welcome to Buildroot|buildroot login:|login:' "$QEMU_BOOT_LOG"; then
-        QEMU_BOOT_OK="oui"
-        ok "Linux a démarré sous QEMU jusqu'à l'invite de connexion"
-    else
-        tail -n 80 "$QEMU_BOOT_LOG" || true
-        die "le test QEMU n'a pas atteint l'invite de connexion (code $QEMU_RC). Voir $QEMU_BOOT_LOG"
-    fi
-else
-    warn "test de démarrage QEMU ignoré (--skip-qemu-test)."
-fi
-
-STLINK_RESULT="non demandé"
-if ((PROBE_STLINK)); then
-    section "11. Détection ST-LINK/OpenOCD sans flashage"
-    STLINK_RESULT="échec"
-    if ! lsusb | grep -Eqi '0483:|STMicroelectronics|ST-LINK'; then
-        die "aucun ST-LINK détecté dans la VM. Vérifiez la redirection USB VirtualBox."
-    fi
-    ok "ST-LINK visible par lsusb"
-
-    OPENOCD_LOG="$LOG_DIR/openocd-probe-$TIMESTAMP.log"
-    OPENOCD_SCRIPTS="$STM32_OUT/host/share/openocd/scripts"
-    run_with_log "$OPENOCD_LOG" \
-        "$STM32_OUT/host/bin/openocd" \
-        -s "$OPENOCD_SCRIPTS" \
-        -f board/stm32f429disc1.cfg \
-        -c "init" \
-        -c "reset halt" \
-        -c "flash probe 0" \
-        -c "flash info 0" \
-        -c "shutdown"
-    STLINK_RESULT="oui"
-    ok "OpenOCD communique avec la carte ; aucune écriture Flash n'a été effectuée"
-fi
-
-section "12. Rapport final"
+section "10. Rapport final"
 
 cat > "$REPORT" <<EOFREPORT
 VALIDATION COMPLÈTE RÉUSSIE
@@ -805,8 +739,11 @@ Sortie STM32          : $STM32_OUT
 Sortie QEMU           : $QEMU_OUT
 Build STM32           : réussi
 Build QEMU            : réussi
-Démarrage QEMU        : $QEMU_BOOT_OK
-Détection ST-LINK     : $STLINK_RESULT
+Commande QEMU         : $RUN_QEMU_IMAGE --root $WORK_ROOT
+Test QEMU court       : $RUN_QEMU_IMAGE --root $WORK_ROOT --timeout 10
+Commande test OpenOCD : $OPENOCD_STM32_RUNNER probe --root $WORK_ROOT
+Commande flash STM32  : $OPENOCD_STM32_RUNNER flash --root $WORK_ROOT
+Profil minicom        : $HOME/.minirc.acm0 (minicom acm0, /dev/ttyACM0 115200 8N1)
 Journal principal     : $MAIN_LOG
 Rapport               : $REPORT
 
