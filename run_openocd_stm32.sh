@@ -8,6 +8,28 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=uclinux_common.sh
 source "$SCRIPT_DIR/uclinux_common.sh"
 
+check_dir() {
+    local path=$1
+    [[ -d "$path" ]] || die "répertoire absent : $path"
+}
+
+stlink_permission_help() {
+    local rules=$1
+    local current_user=${USER:-${LOGNAME:-utilisateur}}
+
+    warn "OpenOCD voit le ST-LINK mais libusb n'a pas le droit de l'ouvrir."
+    if [[ -f "$rules" ]]; then
+        warn "Installez les règles udev OpenOCD standard puis débranchez/rebranchez le ST-LINK :"
+        printf '  sudo install -m 0644 %q /etc/udev/rules.d/60-openocd.rules\n' "$rules" >&2
+        printf '  sudo udevadm control --reload-rules\n' >&2
+        printf '  sudo udevadm trigger --subsystem-match=usb\n' >&2
+        printf '  sudo usermod -aG plugdev %q   # puis nouvelle session si nécessaire\n' "$current_user" >&2
+    else
+        warn "règles udev OpenOCD introuvables : $rules"
+        warn "Installez les règles udev OpenOCD du paquet/distribution, puis reconnectez le ST-LINK."
+    fi
+}
+
 WORK_ROOT="$(uclinux_default_root)"
 STM32_OUT=""
 BOARD_NAME="stm32f429disc1"
@@ -32,7 +54,7 @@ require_config_value() {
     local value
 
     value="$(config_value "$config" "$key")"
-    [[ -n "$value" ]] || uclinux_die "valeur $key introuvable dans $config"
+    [[ -n "$value" ]] || die "valeur $key introuvable dans $config"
     printf '%s\n' "$value"
 }
 
@@ -44,7 +66,7 @@ normalize_address() {
     elif [[ "$value" =~ ^[0-9]+$ ]]; then
         printf '0x%08X\n' "$((10#$value))"
     else
-        uclinux_die "adresse invalide : $value"
+        die "adresse invalide : $value"
     fi
 }
 
@@ -60,8 +82,8 @@ find_unique_glob() {
 
     case "${#matches[@]}" in
         1) printf '%s\n' "${matches[0]}" ;;
-        0) uclinux_die "$description introuvable ($pattern)" ;;
-        *) uclinux_die "$description ambigu : ${matches[*]}" ;;
+        0) die "$description introuvable ($pattern)" ;;
+        *) die "$description ambigu : ${matches[*]}" ;;
     esac
 }
 
@@ -84,7 +106,7 @@ find_linux_config() {
         fi
     done
 
-    uclinux_die "configuration Linux construite introuvable dans $STM32_OUT/build"
+    die "configuration Linux construite introuvable dans $STM32_OUT/build"
 }
 
 afboot_linker_script() {
@@ -110,7 +132,7 @@ afboot_linker_script() {
         }
     ' "$makefile")"
 
-    [[ -n "$linker_script" ]] || uclinux_die "script de lien introuvable pour $target dans $makefile"
+    [[ -n "$linker_script" ]] || die "script de lien introuvable pour $target dans $makefile"
     printf '%s/%s\n' "$(dirname "$makefile")" "$linker_script"
 }
 
@@ -119,7 +141,7 @@ linker_flash_origin() {
     local origin
 
     origin="$(sed -n -E 's/.*FLASH[[:space:]]*\([^)]*\)[[:space:]]*:[[:space:]]*ORIGIN[[:space:]]*=[[:space:]]*([^,[:space:]]+).*/\1/p' "$linker_script" | head -n1)"
-    [[ -n "$origin" ]] || uclinux_die "origine FLASH introuvable dans $linker_script"
+    [[ -n "$origin" ]] || die "origine FLASH introuvable dans $linker_script"
     normalize_address "$origin"
 }
 
@@ -166,28 +188,28 @@ fi
 
 if [[ -z "$MODE" ]]; then
     usage >&2
-    uclinux_die "mode requis : probe ou flash"
+    die "mode requis : probe ou flash"
 fi
 
 while (($#)); do
     case "$1" in
         --root)
-            [[ $# -ge 2 ]] || uclinux_die "--root attend un chemin"
+            [[ $# -ge 2 ]] || die "--root attend un chemin"
             WORK_ROOT=$2
             shift 2
             ;;
         --output)
-            [[ $# -ge 2 ]] || uclinux_die "--output attend un chemin"
+            [[ $# -ge 2 ]] || die "--output attend un chemin"
             STM32_OUT=$2
             shift 2
             ;;
         --board)
-            [[ $# -ge 2 ]] || uclinux_die "--board attend un nom de carte"
+            [[ $# -ge 2 ]] || die "--board attend un nom de carte"
             BOARD_NAME=$2
             shift 2
             ;;
         --log)
-            [[ $# -ge 2 ]] || uclinux_die "--log attend un chemin"
+            [[ $# -ge 2 ]] || die "--log attend un chemin"
             LOG_FILE=$2
             shift 2
             ;;
@@ -200,13 +222,13 @@ while (($#)); do
             exit 0
             ;;
         *)
-            uclinux_die "option inconnue : $1"
+            die "option inconnue : $1"
             ;;
     esac
 done
 
 if ((VERIFY)) && [[ "$MODE" != "flash" ]]; then
-    uclinux_die "--verify s'utilise uniquement avec le mode flash"
+    die "--verify s'utilise uniquement avec le mode flash"
 fi
 
 WORK_ROOT="$(uclinux_realpath "$WORK_ROOT")"
@@ -215,8 +237,8 @@ STM32_OUT="$(uclinux_realpath "$STM32_OUT")"
 IMAGES_DIR="$STM32_OUT/images"
 
 OPENOCD="$STM32_OUT/host/bin/openocd"
-OPENOCD_SCRIPTS="$(uclinux_openocd_scripts_dir "$STM32_OUT")"
-UDEV_RULES="$(uclinux_openocd_udev_rules "$STM32_OUT")"
+OPENOCD_SCRIPTS="$STM32_OUT/host/share/openocd/scripts"
+UDEV_RULES="$STM32_OUT/host/share/openocd/contrib/60-openocd.rules"
 
 BR_CONFIG="$STM32_OUT/.config"
 BOOTLOADER=""
@@ -228,22 +250,22 @@ DTB_ADDR=""
 XIP_IMAGE=""
 XIP_IMAGE_ADDR=""
 
-uclinux_check_file_nonempty "$OPENOCD"
-uclinux_check_dir "$OPENOCD_SCRIPTS"
+check_file_nonempty "$OPENOCD"
+check_dir "$OPENOCD_SCRIPTS"
 if [[ "$MODE" == "flash" ]]; then
-    uclinux_check_file_nonempty "$BR_CONFIG"
+    check_file_nonempty "$BR_CONFIG"
 
     BOOTLOADER="$(find_unique_glob "$IMAGES_DIR/stm32f429i-disco.bin" "image afboot STM32")"
     DTB_NAME="$(require_config_value "$BR_CONFIG" BR2_LINUX_KERNEL_INTREE_DTS_NAME)"
-    [[ "$DTB_NAME" != *" "* ]] || uclinux_die "plusieurs DTB configurés ; utilisez --output avec une configuration STM32 dédiée"
+    [[ "$DTB_NAME" != *" "* ]] || die "plusieurs DTB configurés ; utilisez --output avec une configuration STM32 dédiée"
     DTB="$IMAGES_DIR/${DTB_NAME##*/}.dtb"
     XIP_IMAGE_NAME="$(config_value "$BR_CONFIG" BR2_LINUX_KERNEL_IMAGE_NAME)"
     [[ -n "$XIP_IMAGE_NAME" ]] || XIP_IMAGE_NAME="$(require_config_value "$BR_CONFIG" BR2_LINUX_KERNEL_IMAGE_TARGET_NAME)"
     XIP_IMAGE="$IMAGES_DIR/$XIP_IMAGE_NAME"
 
-    uclinux_check_file_nonempty "$BOOTLOADER"
-    uclinux_check_file_nonempty "$DTB"
-    uclinux_check_file_nonempty "$XIP_IMAGE"
+    check_file_nonempty "$BOOTLOADER"
+    check_file_nonempty "$DTB"
+    check_file_nonempty "$XIP_IMAGE"
 
     BOOTLOADER_BASE="${BOOTLOADER##*/}"
     BOOTLOADER_BASE="${BOOTLOADER_BASE%.bin}"
@@ -255,7 +277,7 @@ if [[ "$MODE" == "flash" ]]; then
     XIP_IMAGE_ADDR="$(normalize_address "$(require_config_value "$LINUX_CONFIG" CONFIG_XIP_PHYS_ADDR)")"
     AFBOOT_KERNEL_ADDR="$(config_value "$BR_CONFIG" BR2_TARGET_AFBOOT_STM32_KERNEL_ADDR)"
     if [[ -n "$AFBOOT_KERNEL_ADDR" && "$(normalize_address "$AFBOOT_KERNEL_ADDR")" != "$XIP_IMAGE_ADDR" ]]; then
-        uclinux_die "adresse noyau incohérente : CONFIG_XIP_PHYS_ADDR=$XIP_IMAGE_ADDR mais BR2_TARGET_AFBOOT_STM32_KERNEL_ADDR=$(normalize_address "$AFBOOT_KERNEL_ADDR")"
+        die "adresse noyau incohérente : CONFIG_XIP_PHYS_ADDR=$XIP_IMAGE_ADDR mais BR2_TARGET_AFBOOT_STM32_KERNEL_ADDR=$(normalize_address "$AFBOOT_KERNEL_ADDR")"
     fi
 fi
 
@@ -306,26 +328,26 @@ else
 fi
 
 if [[ "$MODE" == "probe" ]]; then
-    uclinux_info "Test OpenOCD de la carte STM32 depuis $STM32_OUT ; aucune écriture Flash."
+    info "Test OpenOCD de la carte STM32 depuis $STM32_OUT ; aucune écriture Flash."
 else
-    uclinux_info "Flashage de l'image STM32 depuis $STM32_OUT"
-    uclinux_info "Plan Flash : afboot=$BOOTLOADER_ADDR, dtb=$DTB_ADDR, noyau=$XIP_IMAGE_ADDR"
+    info "Flashage de l'image STM32 depuis $STM32_OUT"
+    info "Plan Flash : afboot=$BOOTLOADER_ADDR, dtb=$DTB_ADDR, noyau=$XIP_IMAGE_ADDR"
 fi
-uclinux_info "Configuration OpenOCD : board/$BOARD_NAME.cfg"
-uclinux_info "Journal OpenOCD : $LOG_FILE"
+info "Configuration OpenOCD : board/$BOARD_NAME.cfg"
+info "Journal OpenOCD : $LOG_FILE"
 
-if uclinux_run_logged "$LOG_FILE" "${OPENOCD_CMD[@]}"; then
+if run_logged "$LOG_FILE" "${OPENOCD_CMD[@]}"; then
     rc=0
 else
     rc=$?
     if grep -q 'LIBUSB_ERROR_ACCESS' "$LOG_FILE"; then
-        uclinux_stlink_permission_help "$UDEV_RULES"
+        stlink_permission_help "$UDEV_RULES"
     fi
-    uclinux_die "OpenOCD a échoué (code $rc)"
+    die "OpenOCD a échoué (code $rc)"
 fi
 
 if [[ "$MODE" == "probe" ]]; then
-    uclinux_info "Test OpenOCD terminé ; aucune écriture Flash effectuée."
+    info "Test OpenOCD terminé ; aucune écriture Flash effectuée."
 else
-    uclinux_info "Flash terminé ; cible réinitialisée et lancée."
+    info "Flash terminé ; cible réinitialisée et lancée."
 fi
