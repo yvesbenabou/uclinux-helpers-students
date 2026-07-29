@@ -55,6 +55,7 @@ uclinux_step_buildroot_download_and_configure() {
     section "6. Génération des configurations actives"
     uclinux_generate_stm32_config
     uclinux_generate_qemu_config
+    mark_step_completed "buildroot-configure"
 }
 
 usage() {

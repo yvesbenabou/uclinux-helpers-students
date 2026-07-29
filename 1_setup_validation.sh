@@ -20,6 +20,22 @@ require_cmd() {
     debug_exit "$__fn" 0
 }
 
+completed_workspace_stages() {
+    local step
+    local marker
+    local found=1
+
+    for step in buildroot-configure build-qemu build-stm32; do
+        marker="$(step_marker "$step")"
+        if [[ -f "$marker" ]] && grep -qx "buildroot=$BUILDROOT_REF" "$marker"; then
+            printf '%s ' "$step"
+            found=0
+        fi
+    done
+
+    return "$found"
+}
+
 create_minicom_acm0_profile() {
     local profile=${1:-"$HOME/.minirc.acm0"}
 
@@ -100,9 +116,13 @@ uclinux_step_setup_validation() {
 
     FREE_KIB="$(df -Pk "$WORK_ROOT" | awk 'NR==2 {print $4}')"
     FREE_GIB=$((FREE_KIB / 1024 / 1024))
-    ((FREE_GIB >= 25)) \
-        || die "espace libre insuffisant sur le système de fichiers de $WORK_ROOT : ${FREE_GIB} Gio ; prévoyez au moins 25 Gio."
-    ok "espace libre sur le système de fichiers de $WORK_ROOT : environ ${FREE_GIB} Gio"
+    if BUILD_MARKERS="$(completed_workspace_stages)"; then
+        ok "espace libre : environ ${FREE_GIB} Gio ; contrôle bloquant ignoré car l'espace Buildroot/QEMU/STM32 est déjà alloué (marqueurs : ${BUILD_MARKERS% })."
+    else
+        ((FREE_KIB >= 25 * 1024 * 1024)) \
+            || die "espace libre insuffisant sur le système de fichiers de $WORK_ROOT : ${FREE_GIB} Gio ; prévoyez au moins 25 Gio."
+        ok "espace libre sur le système de fichiers de $WORK_ROOT : environ ${FREE_GIB} Gio"
+    fi
 
     section "2. Installation des outils Ubuntu"
 
