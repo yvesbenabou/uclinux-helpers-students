@@ -62,7 +62,7 @@ usage() {
 Étape 2 : acquisition de Buildroot et génération des configurations.
 
 Utilisation :
-  ./2_buildroot_download_and_build.sh [options]
+  ./2_buildroot_download_and_configure.sh [options]
 
 Options :
   --root CHEMIN   Racine de travail, défaut : $UCLINUX_ROOT ou $HOME/uclinux
@@ -86,7 +86,7 @@ while (($#)); do
     esac
 done
 
-uclinux_begin_logging buildroot-download-build
+uclinux_begin_logging buildroot-download-configure
 uclinux_step_buildroot_download_and_configure
 section "Étape 2 terminée"
 ok "Buildroot est prêt"

@@ -372,7 +372,7 @@ uclinux_require_buildroot() {
     local current_commit
 
     [[ -d "$BUILDROOT_DIR/.git" ]] \
-        || die "Buildroot est absent : exécutez d'abord $SCRIPT_DIR/2_buildroot_download_and_build.sh"
+        || die "Buildroot est absent : exécutez d'abord $SCRIPT_DIR/2_buildroot_download_and_configure.sh"
 
     current_ref="$(git -C "$BUILDROOT_DIR" describe --tags --exact-match 2>/dev/null || true)"
     if [[ "$current_ref" != "$BUILDROOT_REF" ]]; then

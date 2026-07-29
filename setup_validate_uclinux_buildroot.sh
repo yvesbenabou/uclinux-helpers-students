@@ -19,7 +19,7 @@ Préparation et validation complète de l’environnement uClinux/Buildroot.
 
 Ce script exécute successivement :
   ./1_setup_validation.sh
-  ./2_buildroot_download_and_build.sh
+  ./2_buildroot_download_and_configure.sh
   ./3_uclinux_qemu_dl_and_build.sh
   ./4_uclinux_stm32_dl_and_build.sh
 
@@ -95,7 +95,7 @@ section "Exécution de l'étape 1/4"
 "$SCRIPT_DIR/1_setup_validation.sh" "${SETUP_ARGS[@]}"
 
 section "Exécution de l'étape 2/4"
-"$SCRIPT_DIR/2_buildroot_download_and_build.sh" "${COMMON_ARGS[@]}"
+"$SCRIPT_DIR/2_buildroot_download_and_configure.sh" "${COMMON_ARGS[@]}"
 
 if ((QUICK)); then
     section "Validation rapide terminée"

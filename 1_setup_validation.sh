@@ -38,6 +38,29 @@ MINICOMEOF
     printf '%s\n' "$profile"
 }
 
+configure_serial_access() {
+    local current_user
+
+    current_user="$(id -un)"
+    if ! getent group dialout >/dev/null 2>&1; then
+        warn "groupe dialout absent : accès automatique aux ports série non configuré."
+        return 0
+    fi
+
+    if id -nG "$current_user" | grep -qw dialout; then
+        ok "utilisateur $current_user membre du groupe dialout"
+        return 0
+    fi
+
+    if command -v sudo >/dev/null 2>&1; then
+        sudo usermod -aG dialout "$current_user"
+        warn "utilisateur $current_user ajouté au groupe dialout."
+        warn "Fermez puis rouvrez la session avant d'utiliser la console série."
+    else
+        warn "sudo absent : ajoutez $current_user au groupe dialout avant d'utiliser la console série."
+    fi
+}
+
 uclinux_step_setup_validation() {
     section "1. Contrôle du système hôte"
 
@@ -75,10 +98,11 @@ uclinux_step_setup_validation() {
     MEM_GIB=$((MEM_KIB / 1024 / 1024))
     ((MEM_GIB >= 6)) && ok "mémoire disponible : environ ${MEM_GIB} Gio" || warn "mémoire limitée : environ ${MEM_GIB} Gio ; 8 Gio sont recommandés."
 
-    FREE_KIB="$(df -Pk "$HOME" | awk 'NR==2 {print $4}')"
+    FREE_KIB="$(df -Pk "$WORK_ROOT" | awk 'NR==2 {print $4}')"
     FREE_GIB=$((FREE_KIB / 1024 / 1024))
-    ((FREE_GIB >= 25)) || die "espace libre insuffisant dans $HOME : ${FREE_GIB} Gio ; prévoyez au moins 25 Gio."
-    ok "espace libre : environ ${FREE_GIB} Gio"
+    ((FREE_GIB >= 25)) \
+        || die "espace libre insuffisant sur le système de fichiers de $WORK_ROOT : ${FREE_GIB} Gio ; prévoyez au moins 25 Gio."
+    ok "espace libre sur le système de fichiers de $WORK_ROOT : environ ${FREE_GIB} Gio"
 
     section "2. Installation des outils Ubuntu"
 
@@ -116,6 +140,10 @@ uclinux_step_setup_validation() {
     printf 'Minicom   : '; minicom --version | head -n1
     MINICOM_PROFILE="$(create_minicom_acm0_profile)"
     ok "profil minicom créé : minicom acm0 -> /dev/ttyACM0, 115200 8N1 ($MINICOM_PROFILE)"
+    configure_serial_access
+    [[ -x "$SCRIPT_DIR/connect_stm32_console.sh" ]] \
+        || die "script de console STM32 absent ou non exécutable : $SCRIPT_DIR/connect_stm32_console.sh"
+    ok "console STM32 : $SCRIPT_DIR/connect_stm32_console.sh"
 
     section "3. Accès SSH depuis l'hôte"
 
@@ -195,7 +223,7 @@ Console série STM32F429I-DISC1 :
   - PA9 est connecté sur RX du lien USB-TTL
   - PA10 est connecté sur TX du lien USB-TTL
   - carte GND sur GND USB-TTL
-  - lancer : minicom acm0
+  - lancer : $SCRIPT_DIR/connect_stm32_console.sh
   - profil généré : $HOME/.minirc.acm0 (/dev/ttyACM0, 115200 8N1)
   - quitter minicom : Ctrl-A puis X.
 
