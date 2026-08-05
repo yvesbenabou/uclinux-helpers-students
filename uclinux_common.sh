@@ -416,6 +416,10 @@ uclinux_generate_stm32_config() {
 }
 
 uclinux_generate_qemu_config() {
+    # Génère la configuration .config depuis qemu_arm_vexpress_defconfig + additions par dépendances de Kconfig
+    # la toolchain à venir est préconfigurée par BR2_arm=y BR2_cortex_a9=y BR2_ARM_ENABLE_NEON=y BR2_ARM_ENABLE_VFP=y, 
+    # complétée par Kconfig en  BR2_ARCH="arm" BR2_ARM_CPU_ARMV7A=y BR2_cortex_a9=y BR2_ARM_EABIHF=y BR2_TOOLCHAIN_BUILDROOT=y BR2_TOOLCHAIN_BUILDROOT_GLIBC=y BR2_GCC_VERSION="14.3.0" BR2_BINUTILS_VERSION="2.43.1"
+
     run_with_log "$LOG_DIR/defconfig-qemu-$TIMESTAMP.log" make_br "$QEMU_OUT" qemu_arm_vexpress_defconfig
     check_file_nonempty "$QEMU_OUT/.config"
     grep -q 'BR2_cortex_a9=y' "$QEMU_OUT/.config"
