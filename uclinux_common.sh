@@ -381,11 +381,37 @@ uclinux_require_buildroot() {
     fi
 }
 
+uclinux_enable_host_environment_setup() {
+    local out=$1
+    local config="$out/.config"
+    local config_tool="$BUILDROOT_DIR/utils/config"
+    local target
+
+    target="$(basename "$out")"
+    check_file_nonempty "$config"
+
+    if grep -qx 'BR2_PACKAGE_HOST_ENVIRONMENT_SETUP=y' "$config"; then
+        ok "environment-setup hôte activé pour $target"
+        return 0
+    fi
+
+    check_file_nonempty "$config_tool"
+    info "Activation de l'environnement de cross-compilation pour $target"
+    run_with_log "$LOG_DIR/environment-setup-$target-$TIMESTAMP.log" \
+        "$config_tool" --file "$config" --enable BR2_PACKAGE_HOST_ENVIRONMENT_SETUP
+    run_with_log "$LOG_DIR/olddefconfig-$target-$TIMESTAMP.log" \
+        make_br "$out" olddefconfig
+    grep -qx 'BR2_PACKAGE_HOST_ENVIRONMENT_SETUP=y' "$config" \
+        || die "impossible d'activer BR2_PACKAGE_HOST_ENVIRONMENT_SETUP pour $target"
+    ok "environment-setup hôte activé pour $target"
+}
+
 uclinux_generate_stm32_config() {
     run_with_log "$LOG_DIR/defconfig-stm32-$TIMESTAMP.log" make_br "$STM32_OUT" stm32f429_disco_xip_defconfig
     check_file_nonempty "$STM32_OUT/.config"
     grep -q 'BR2_cortex_m4=y' "$STM32_OUT/.config"
     grep -q "BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE=\"$EXPECTED_LINUX_VERSION\"" "$STM32_OUT/.config"
+    uclinux_enable_host_environment_setup "$STM32_OUT"
     ok "configuration active STM32 générée dans $STM32_OUT/.config"
 }
 
@@ -393,5 +419,6 @@ uclinux_generate_qemu_config() {
     run_with_log "$LOG_DIR/defconfig-qemu-$TIMESTAMP.log" make_br "$QEMU_OUT" qemu_arm_vexpress_defconfig
     check_file_nonempty "$QEMU_OUT/.config"
     grep -q 'BR2_cortex_a9=y' "$QEMU_OUT/.config"
+    uclinux_enable_host_environment_setup "$QEMU_OUT"
     ok "configuration active QEMU générée dans $QEMU_OUT/.config"
 }

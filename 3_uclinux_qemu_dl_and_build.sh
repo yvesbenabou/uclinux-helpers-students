@@ -25,6 +25,7 @@ uclinux_step_build_qemu() {
     section "Préparation des sources Linux QEMU"
     uclinux_require_buildroot
     uclinux_ensure_qemu_config
+    uclinux_enable_host_environment_setup "$QEMU_OUT"
     prepare_linux_override "$QEMU_OUT"
 
     section "Construction complète QEMU ARM VExpress"

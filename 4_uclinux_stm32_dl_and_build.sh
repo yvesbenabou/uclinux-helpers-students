@@ -43,6 +43,7 @@ uclinux_step_build_stm32() {
     section "Préparation des sources Linux STM32"
     uclinux_require_buildroot
     uclinux_ensure_stm32_config
+    uclinux_enable_host_environment_setup "$STM32_OUT"
     prepare_linux_override "$STM32_OUT"
 
     section "Construction complète STM32F429I-DISC1"
