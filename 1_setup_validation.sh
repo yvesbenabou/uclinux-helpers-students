@@ -132,7 +132,7 @@ uclinux_step_setup_validation() {
         file findutils gawk sed diffutils coreutils
         python3 libncurses-dev bison flex libssl-dev libelf-dev
         device-tree-compiler usbutils
-        openssh-server iproute2 time locales minicom
+        openssh-server iproute2 time locales minicom mg mc
     )
 
     if ((SKIP_APT == 0)); then
