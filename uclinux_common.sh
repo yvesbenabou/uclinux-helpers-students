@@ -21,7 +21,7 @@ uclinux_stm32_output_dir() {
 
 uclinux_qemu_output_dir() {
     local work_root=$1
-    printf '%s/outputs/qemu-vexpress\n' "$work_root"
+    printf '%s/outputs/qemu\n' "$work_root"
 }
 
 uclinux_default_log_file() {
