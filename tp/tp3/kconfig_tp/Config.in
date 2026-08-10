@@ -1,0 +1,19 @@
+menu "TP Kconfig" 
+
+config BR2_KCONFIG_TP
+	bool "Activer le TP"
+
+config BR2_KCONFIG_TP_MESSAGE
+	string "Message du TP"
+	default "Salut depuis le TP de Kconfig"
+	depends on BR2_KCONFIG_TP
+
+config BR2_KCONFIG_TP_PREREQUIS
+	bool
+
+config BR2_KCONFIG_TP_SUPER_FEATURE
+	bool "Active la super feature"
+	depends on BR2_KCONFIG_TP
+	select BR2_KCONFIG_TP_PREREQUIS
+
+endmenu
