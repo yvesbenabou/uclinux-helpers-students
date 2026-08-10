@@ -16,7 +16,7 @@ uclinux_timestamp() {
 
 uclinux_stm32_output_dir() {
     local work_root=$1
-    printf '%s/outputs/stm32f429\n' "$work_root"
+    printf '%s/outputs/stm32\n' "$work_root"
 }
 
 uclinux_qemu_output_dir() {
