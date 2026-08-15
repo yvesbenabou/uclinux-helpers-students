@@ -70,6 +70,21 @@ normalize_address() {
     fi
 }
 
+check_image_before() {
+    local description=$1
+    local image=$2
+    local address=$3
+    local next_description=$4
+    local next_address=$5
+    local size
+    local end
+
+    size="$(stat -c %s "$image")"
+    end=$((address + size))
+    ((end <= next_address)) || die \
+        "$description déborde sur $next_description : $(printf '0x%08X-0x%08X' "$((address))" "$end"), limite $(printf '0x%08X' "$((next_address))")"
+}
+
 find_unique_glob() {
     local pattern=$1
     local description=$2
@@ -249,6 +264,8 @@ DTB=""
 DTB_ADDR=""
 XIP_IMAGE=""
 XIP_IMAGE_ADDR=""
+ROMFS_IMAGE=""
+ROMFS_IMAGE_ADDR=""
 
 check_file_nonempty "$OPENOCD"
 check_dir "$OPENOCD_SCRIPTS"
@@ -256,16 +273,21 @@ if [[ "$MODE" == "flash" ]]; then
     check_file_nonempty "$BR_CONFIG"
 
     BOOTLOADER="$(find_unique_glob "$IMAGES_DIR/stm32f429i-disco.bin" "image afboot STM32")"
-    DTB_NAME="$(require_config_value "$BR_CONFIG" BR2_LINUX_KERNEL_INTREE_DTS_NAME)"
+    DTB_NAME="$(uclinux_stm32_dtb_name "$BR_CONFIG")" \
+        || die "nom du DTB STM32 introuvable dans la configuration Buildroot"
     [[ "$DTB_NAME" != *" "* ]] || die "plusieurs DTB configurés ; utilisez --output avec une configuration STM32 dédiée"
     DTB="$IMAGES_DIR/${DTB_NAME##*/}.dtb"
     XIP_IMAGE_NAME="$(config_value "$BR_CONFIG" BR2_LINUX_KERNEL_IMAGE_NAME)"
     [[ -n "$XIP_IMAGE_NAME" ]] || XIP_IMAGE_NAME="$(require_config_value "$BR_CONFIG" BR2_LINUX_KERNEL_IMAGE_TARGET_NAME)"
     XIP_IMAGE="$IMAGES_DIR/$XIP_IMAGE_NAME"
+    ROMFS_IMAGE="$IMAGES_DIR/rootfs.romfs"
 
     check_file_nonempty "$BOOTLOADER"
     check_file_nonempty "$DTB"
     check_file_nonempty "$XIP_IMAGE"
+    check_file_nonempty "$ROMFS_IMAGE"
+    [[ "$(dd if="$ROMFS_IMAGE" bs=8 count=1 2>/dev/null)" == '-rom1fs-' ]] \
+        || die "signature ROMFS invalide : $ROMFS_IMAGE"
 
     BOOTLOADER_BASE="${BOOTLOADER##*/}"
     BOOTLOADER_BASE="${BOOTLOADER_BASE%.bin}"
@@ -275,10 +297,16 @@ if [[ "$MODE" == "flash" ]]; then
     BOOTLOADER_ADDR="$(linker_flash_origin "$AFBOOT_LINKER_SCRIPT")"
     DTB_ADDR="$(normalize_address "$(require_config_value "$BR_CONFIG" BR2_TARGET_AFBOOT_STM32_DTB_ADDR)")"
     XIP_IMAGE_ADDR="$(normalize_address "$(require_config_value "$LINUX_CONFIG" CONFIG_XIP_PHYS_ADDR)")"
+    ROMFS_IMAGE_ADDR="$(normalize_address "$STM32_ROMFS_ADDR")"
     AFBOOT_KERNEL_ADDR="$(config_value "$BR_CONFIG" BR2_TARGET_AFBOOT_STM32_KERNEL_ADDR)"
     if [[ -n "$AFBOOT_KERNEL_ADDR" && "$(normalize_address "$AFBOOT_KERNEL_ADDR")" != "$XIP_IMAGE_ADDR" ]]; then
         die "adresse noyau incohérente : CONFIG_XIP_PHYS_ADDR=$XIP_IMAGE_ADDR mais BR2_TARGET_AFBOOT_STM32_KERNEL_ADDR=$(normalize_address "$AFBOOT_KERNEL_ADDR")"
     fi
+
+    check_image_before afboot "$BOOTLOADER" "$BOOTLOADER_ADDR" DTB "$DTB_ADDR"
+    check_image_before DTB "$DTB" "$DTB_ADDR" xipImage "$XIP_IMAGE_ADDR"
+    check_image_before xipImage "$XIP_IMAGE" "$XIP_IMAGE_ADDR" ROMFS "$ROMFS_IMAGE_ADDR"
+    check_image_before ROMFS "$ROMFS_IMAGE" "$ROMFS_IMAGE_ADDR" "fin de la Flash" "$STM32_FLASH_END"
 fi
 
 if [[ -z "$LOG_FILE" ]]; then
@@ -311,6 +339,7 @@ else
         -c "flash write_image erase $BOOTLOADER $BOOTLOADER_ADDR"
         -c "flash write_image erase $DTB $DTB_ADDR"
         -c "flash write_image erase $XIP_IMAGE $XIP_IMAGE_ADDR"
+        -c "flash write_image erase $ROMFS_IMAGE $ROMFS_IMAGE_ADDR"
     )
 
     if ((VERIFY)); then
@@ -318,6 +347,7 @@ else
             -c "verify_image $BOOTLOADER $BOOTLOADER_ADDR"
             -c "verify_image $DTB $DTB_ADDR"
             -c "verify_image $XIP_IMAGE $XIP_IMAGE_ADDR"
+            -c "verify_image $ROMFS_IMAGE $ROMFS_IMAGE_ADDR"
         )
     fi
 
@@ -331,7 +361,7 @@ if [[ "$MODE" == "probe" ]]; then
     info "Test OpenOCD de la carte STM32 depuis $STM32_OUT ; aucune écriture Flash."
 else
     info "Flashage de l'image STM32 depuis $STM32_OUT"
-    info "Plan Flash : afboot=$BOOTLOADER_ADDR, dtb=$DTB_ADDR, noyau=$XIP_IMAGE_ADDR"
+    info "Plan Flash : afboot=$BOOTLOADER_ADDR, dtb=$DTB_ADDR, noyau=$XIP_IMAGE_ADDR, ROMFS=$ROMFS_IMAGE_ADDR"
 fi
 info "Configuration OpenOCD : board/$BOARD_NAME.cfg"
 info "Journal OpenOCD : $LOG_FILE"

@@ -41,10 +41,10 @@ uclinux_check_buildroot_defconfigs() {
     grep -q "BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE=\"$EXPECTED_LINUX_VERSION\"" "$STM32_DEFCONFIG" \
         || die "le defconfig STM32 ne sélectionne pas Linux $EXPECTED_LINUX_VERSION."
     grep -q 'BR2_LINUX_KERNEL_IMAGE_TARGET_NAME="xipImage"' "$STM32_DEFCONFIG" || die "xipImage non sélectionnée."
-    grep -q 'BR2_TARGET_ROOTFS_INITRAMFS=y' "$STM32_DEFCONFIG" || die "initramfs non sélectionné."
+    grep -q 'BR2_TARGET_ROOTFS_INITRAMFS=y' "$STM32_DEFCONFIG" || die "initramfs absent du defconfig STM32 de référence."
     grep -q 'BR2_TARGET_AFBOOT_STM32=y' "$STM32_DEFCONFIG" || die "afboot-stm32 non sélectionné."
     grep -q 'BR2_PACKAGE_HOST_OPENOCD=y' "$STM32_DEFCONFIG" || die "OpenOCD hôte non sélectionné."
-    ok "le defconfig STM32 correspond au scénario pédagogique"
+    ok "defconfig STM32 de référence reconnu ; la configuration active remplacera son initramfs par ROMFS"
 }
 
 uclinux_step_buildroot_download_and_configure() {

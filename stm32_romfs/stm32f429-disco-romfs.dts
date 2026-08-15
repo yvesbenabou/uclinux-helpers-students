@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+
+#include "stm32f429-disco.dts"
+
+&{/chosen} {
+	bootargs = "root=mtd0 rootfstype=romfs ro";
+};
+
+/ {
+	romfs@8160000 {
+		compatible = "mtd-rom";
+		reg = <0x08160000 0x000a0000>;
+		bank-width = <4>;
+		linux,mtd-name = "rootfs";
+	};
+};

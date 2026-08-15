@@ -128,7 +128,7 @@ uclinux_step_setup_validation() {
 
     APT_PACKAGES=(
         build-essential binutils git wget curl ca-certificates
-        rsync cpio unzip bzip2 gzip xz-utils tar patch perl bc
+        rsync cpio genromfs unzip bzip2 gzip xz-utils tar patch perl bc
         file findutils gawk sed diffutils coreutils
         python3 libncurses-dev bison flex libssl-dev libelf-dev
         device-tree-compiler usbutils
@@ -148,7 +148,7 @@ uclinux_step_setup_validation() {
         warn "installation APT ignorée (--skip-apt)."
     fi
 
-    for cmd in gcc g++ make git wget rsync cpio file bc python3 bison flex dtc ssh sshd readelf timeout sha256sum script minicom; do
+    for cmd in gcc g++ make git wget rsync cpio genromfs file bc python3 bison flex dtc ssh sshd readelf timeout sha256sum script minicom; do
         require_cmd "$cmd"
     done
     ok "outils fondamentaux présents"
