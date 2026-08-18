@@ -1,0 +1,79 @@
+/dts-v1/;
+
+/ {
+    /* Description de la carte */
+    model = "My example board";
+    compatible = "myvendor,my-board";   /* identifie le matériel, format "vendor,model" */
+
+    /*
+     * Les enfants de / utilisent :
+     * - 1 cellule de 32 bits pour une adresse
+     * - 1 cellule de 32 bits pour une taille
+     */
+    #address-cells = <1>;
+    #size-cells = <1>;
+
+    /* Description des processeurs */
+    cpus {
+        #address-cells = <1>;   /* 1 cellule pour l'identifiant CPU */
+        #size-cells = <0>;      /* un CPU n'a pas de champ "taille" */
+
+        cpu@0 {
+            device_type = "cpu";
+            reg = <0>;          /* identifiant du CPU 0, PAS une adresse */
+        };
+    };
+
+    /* 256 Mio de RAM à partir de l'adresse physique 0x80000000 */
+    memory@80000000 {
+        device_type = "memory";
+        reg = <0x80000000 0x10000000>;
+              /* adresse      taille */
+    };
+
+    /* Bus contenant des périphériques intégrés au SoC */
+    soc {
+        compatible = "simple-bus";
+
+        #address-cells = <1>;
+        #size-cells = <1>;
+
+        /*
+         * Adresses identiques dans l'espace du bus
+         * et dans celui de son parent
+         */
+        ranges;
+
+        uart0: serial@10000000 {
+            /*
+             * Identifie le matériel pour permettre
+             * son association avec un pilote
+             */
+            compatible = "myvendor,my-uart";  /* périphérique fictif */
+
+            /*
+             * Registres MMIO :
+             * base = 0x10000000
+             * taille = 0x1000 = 4 Kio
+             */
+            reg = <0x10000000 0x1000>;
+
+            status = "okay";
+        };
+    };
+
+    /*
+     * Informations de démarrage, pas du matériel
+     */
+    chosen {
+        bootargs = "console=ttyS0";
+
+        /*
+         * &uart0 référence le label uart0:
+         * défini plus haut
+         */
+        stdout-path = &uart0;
+  
+    };
+
+}
