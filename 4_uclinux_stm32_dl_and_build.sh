@@ -81,10 +81,16 @@ uclinux_step_build_stm32() {
         run_with_log "$LOG_DIR/build-stm32-$TIMESTAMP.log" make_br "$STM32_OUT" -j"$JOBS"
     fi
 
-    if [[ -e "$STM32_OUT/images/stm32f429i-disco.bin" ]]; then
-        rm -f -- "$STM32_OUT/images/stm32f429i-disco.bin"
-        warn "ancienne image afboot supprimée : $STM32_OUT/images/stm32f429i-disco.bin"
-    fi
+    STALE_AFBOOT_IMAGES=(
+        stm32f429i-disco.bin stm32429i-eval.bin stm32746g-eval.bin
+        stm32f469i-disco.bin stm32h743i-eval.bin
+    )
+    for stale_image in "${STALE_AFBOOT_IMAGES[@]}"; do
+        if [[ -e "$STM32_OUT/images/$stale_image" ]]; then
+            rm -f -- "$STM32_OUT/images/$stale_image"
+            warn "ancienne image afboot supprimée : $STM32_OUT/images/$stale_image"
+        fi
+    done
     STALE_ROMFS_IMAGES=(rootfs.romfs rootfs.tar stm32f429-disco-romfs.dtb)
     for stale_image in "${STALE_ROMFS_IMAGES[@]}"; do
         if [[ -e "$STM32_OUT/images/$stale_image" ]]; then
