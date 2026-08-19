@@ -46,8 +46,17 @@ run_logged() {
 }
 : "${BUILDROOT_REF:=2025.08}"
 : "${EXPECTED_LINUX_VERSION:=6.1.133}"
+: "${EXPECTED_UBOOT_VERSION:=2025.07}"
 : "${LINUX_STABLE_GIT_URL:=https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git}"
 : "${WORK_ROOT:=$(uclinux_default_root)}"
+: "${STM32_UBOOT_ADDR:=0x08000000}"
+: "${STM32_UBOOT_ENV_ADDR:=0x08020000}"
+: "${STM32_UBOOT_ENV_END:=0x08040000}"
+: "${STM32_UIMAGE_ADDR:=0x08040000}"
+: "${STM32_XIP_ADDR:=0x08040040}"
+: "${STM32_DTB_ADDR:=0x081FB000}"
+: "${STM32_FLASH_END:=0x08200000}"
+: "${STM32_STUDENT_HEADROOM:=102400}"
 : "${QUIET:=0}"
 : "${DEBUG_TRACE:=0}"
 : "${RESUME:=1}"
@@ -346,7 +355,9 @@ step_fingerprint() {
     local rc
 
     debug_enter "$__fn"
+    shift
     [[ -f "$out/local.mk" ]] && files+=("$out/local.mk")
+    files+=("$@")
     sha256sum "${files[@]}" | sha256sum | awk '{print $1}'
     rc=${PIPESTATUS[0]}
     debug_exit "$__fn" "$rc"
@@ -406,13 +417,96 @@ uclinux_enable_host_environment_setup() {
     ok "environment-setup hôte activé pour $target"
 }
 
+uclinux_config_append_word() {
+    local config=$1
+    local key=$2
+    local word=$3
+    local words
+
+    words="$(br_config_value "$config" "$key")"
+    case " $words " in
+        *" $word "*) printf '%s\n' "$words" ;;
+        "  ") printf '%s\n' "$word" ;;
+        *) printf '%s %s\n' "$words" "$word" ;;
+    esac
+}
+
+uclinux_stm32_dtb_name() {
+    local config=$1
+    local intree_name
+    local custom_path
+
+    intree_name="$(br_config_value "$config" BR2_LINUX_KERNEL_INTREE_DTS_NAME)"
+    if [[ -n "$intree_name" ]]; then
+        [[ "$intree_name" != *" "* ]] || return 1
+        printf '%s\n' "${intree_name##*/}"
+        return 0
+    fi
+
+    custom_path="$(br_config_value "$config" BR2_LINUX_KERNEL_CUSTOM_DTS_PATH)"
+    [[ -n "$custom_path" && "$custom_path" != *" "* && "$custom_path" == *.dts ]] || return 1
+    custom_path="${custom_path##*/}"
+    printf '%s\n' "${custom_path%.dts}"
+}
+
+uclinux_stm32_uboot_configured() {
+    local config=$1
+    local asset_dir="$SCRIPT_DIR/stm32_uboot"
+    local fragments
+    local post_image
+
+    [[ -s "$config" ]] || return 1
+    grep -Fqx '# BR2_TARGET_AFBOOT_STM32 is not set' "$config" || return 1
+    grep -Fqx 'BR2_TARGET_UBOOT=y' "$config" || return 1
+    grep -Fqx "BR2_TARGET_UBOOT_VERSION=\"$EXPECTED_UBOOT_VERSION\"" "$config" || return 1
+    grep -Fqx 'BR2_TARGET_UBOOT_BOARD_DEFCONFIG="stm32f429-discovery"' "$config" || return 1
+    grep -Fqx 'BR2_TARGET_UBOOT_FORMAT_BIN=y' "$config" || return 1
+
+    fragments="$(br_config_value "$config" BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES)"
+    [[ " $fragments " == *" $asset_dir/linux.fragment "* ]] || return 1
+    fragments="$(br_config_value "$config" BR2_TARGET_UBOOT_CONFIG_FRAGMENT_FILES)"
+    [[ " $fragments " == *" $asset_dir/uboot.fragment "* ]] || return 1
+    post_image="$(br_config_value "$config" BR2_ROOTFS_POST_IMAGE_SCRIPT)"
+    [[ " $post_image " == *" $asset_dir/post_image.sh "* ]] || return 1
+}
+
 uclinux_generate_stm32_config() {
+    local config_tool="$BUILDROOT_DIR/utils/config"
+    local config="$STM32_OUT/.config"
+    local asset_dir="$SCRIPT_DIR/stm32_uboot"
+    local linux_fragments
+    local post_image
+
     run_with_log "$LOG_DIR/defconfig-stm32-$TIMESTAMP.log" make_br "$STM32_OUT" stm32f429_disco_xip_defconfig
-    check_file_nonempty "$STM32_OUT/.config"
-    grep -q 'BR2_cortex_m4=y' "$STM32_OUT/.config"
-    grep -q "BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE=\"$EXPECTED_LINUX_VERSION\"" "$STM32_OUT/.config"
+    check_file_nonempty "$config"
+    check_file_nonempty "$config_tool"
+    check_file_nonempty "$asset_dir/linux.fragment"
+    check_file_nonempty "$asset_dir/uboot.fragment"
+    check_file_nonempty "$asset_dir/post_image.sh"
+
+    linux_fragments="$(uclinux_config_append_word "$config" BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES "$asset_dir/linux.fragment")"
+    post_image="$(uclinux_config_append_word "$config" BR2_ROOTFS_POST_IMAGE_SCRIPT "$asset_dir/post_image.sh")"
+
+    info "Remplacement d'afboot par U-Boot $EXPECTED_UBOOT_VERSION construit par Buildroot"
+    run_with_log "$LOG_DIR/config-uboot-stm32-$TIMESTAMP.log" \
+        "$config_tool" --file "$config" \
+        --disable BR2_TARGET_AFBOOT_STM32 \
+        --enable BR2_TARGET_UBOOT \
+        --enable BR2_TARGET_UBOOT_LATEST_VERSION \
+        --enable BR2_TARGET_UBOOT_USE_DEFCONFIG \
+        --set-str BR2_TARGET_UBOOT_BOARD_DEFCONFIG stm32f429-discovery \
+        --set-str BR2_TARGET_UBOOT_CONFIG_FRAGMENT_FILES "$asset_dir/uboot.fragment" \
+        --enable BR2_TARGET_UBOOT_FORMAT_BIN \
+        --set-str BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES "$linux_fragments" \
+        --set-str BR2_ROOTFS_POST_IMAGE_SCRIPT "$post_image"
+    run_with_log "$LOG_DIR/olddefconfig-uboot-stm32-$TIMESTAMP.log" make_br "$STM32_OUT" olddefconfig
+
+    grep -q 'BR2_cortex_m4=y' "$config"
+    grep -q "BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE=\"$EXPECTED_LINUX_VERSION\"" "$config"
+    uclinux_stm32_uboot_configured "$config" \
+        || die "la configuration STM32 active n'utilise pas le U-Boot Buildroot attendu."
     uclinux_enable_host_environment_setup "$STM32_OUT"
-    ok "configuration active STM32 générée dans $STM32_OUT/.config"
+    ok "configuration active STM32 générée : U-Boot, noyau XIP et initramfs"
 }
 
 uclinux_generate_qemu_config() {

@@ -1,0 +1,3 @@
+# U-Boot's 64-byte legacy-image header starts at 0x08040000.  Link the
+# execute-in-place kernel immediately after that header.
+CONFIG_XIP_PHYS_ADDR=0x08040040

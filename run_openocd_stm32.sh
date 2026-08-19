@@ -35,6 +35,7 @@ STM32_OUT=""
 BOARD_NAME="stm32f429disc1"
 LOG_FILE=""
 VERIFY=0
+RESET_ENV=0
 MODE=""
 
 config_value() {
@@ -68,6 +69,21 @@ normalize_address() {
     else
         die "adresse invalide : $value"
     fi
+}
+
+check_image_before() {
+    local description=$1
+    local image=$2
+    local address=$3
+    local next_description=$4
+    local next_address=$5
+    local size
+    local end
+
+    size="$(stat -c %s "$image")"
+    end=$((address + size))
+    ((end <= next_address)) || die \
+        "$description déborde sur $next_description : $(printf '0x%08X-0x%08X' "$((address))" "$end"), limite $(printf '0x%08X' "$((next_address))")"
 }
 
 find_unique_glob() {
@@ -109,42 +125,6 @@ find_linux_config() {
     die "configuration Linux construite introuvable dans $STM32_OUT/build"
 }
 
-afboot_linker_script() {
-    local makefile=$1
-    local target=$2
-    local linker_script
-
-    linker_script="$(awk -v target="$target" '
-        index($0, target ":") == 1 { in_target = 1; next }
-        in_target && $0 ~ /^[^[:space:]].*:/ { exit }
-        in_target && /[$][(]LD[)]/ {
-            for (i = 1; i <= NF; i++) {
-                if ($i == "-T" && (i + 1) <= NF) {
-                    print $(i + 1)
-                    exit
-                }
-                if ($i ~ /^-T./) {
-                    sub(/^-T/, "", $i)
-                    print $i
-                    exit
-                }
-            }
-        }
-    ' "$makefile")"
-
-    [[ -n "$linker_script" ]] || die "script de lien introuvable pour $target dans $makefile"
-    printf '%s/%s\n' "$(dirname "$makefile")" "$linker_script"
-}
-
-linker_flash_origin() {
-    local linker_script=$1
-    local origin
-
-    origin="$(sed -n -E 's/.*FLASH[[:space:]]*\([^)]*\)[[:space:]]*:[[:space:]]*ORIGIN[[:space:]]*=[[:space:]]*([^,[:space:]]+).*/\1/p' "$linker_script" | head -n1)"
-    [[ -n "$origin" ]] || die "origine FLASH introuvable dans $linker_script"
-    normalize_address "$origin"
-}
-
 usage() {
     cat <<'USAGE'
 Exécute OpenOCD pour la carte STM32F429I-DISC1.
@@ -164,6 +144,7 @@ Options :
                       Autre valeur courante : stm32f429discovery
   --log CHEMIN        Journal OpenOCD
   --verify            Vérifier les images après écriture, mode flash seulement
+  --reset-env         Effacer volontairement l'environnement U-Boot persistant
   -h, --help          Afficher cette aide
 
 Console série Linux sur USART1 à 115200 bauds :
@@ -217,6 +198,10 @@ while (($#)); do
             VERIFY=1
             shift
             ;;
+        --reset-env)
+            RESET_ENV=1
+            shift
+            ;;
         -h|--help)
             usage
             exit 0
@@ -230,6 +215,9 @@ done
 if ((VERIFY)) && [[ "$MODE" != "flash" ]]; then
     die "--verify s'utilise uniquement avec le mode flash"
 fi
+if ((RESET_ENV)) && [[ "$MODE" != "flash" ]]; then
+    die "--reset-env s'utilise uniquement avec le mode flash"
+fi
 
 WORK_ROOT="$(uclinux_realpath "$WORK_ROOT")"
 STM32_OUT="${STM32_OUT:-$(uclinux_stm32_output_dir "$WORK_ROOT")}"
@@ -241,44 +229,47 @@ OPENOCD_SCRIPTS="$STM32_OUT/host/share/openocd/scripts"
 UDEV_RULES="$STM32_OUT/host/share/openocd/contrib/60-openocd.rules"
 
 BR_CONFIG="$STM32_OUT/.config"
-BOOTLOADER=""
-BOOTLOADER_ADDR=""
-AFBOOT_BUILD_DIR=""
-AFBOOT_LINKER_SCRIPT=""
+UBOOT_IMAGE=""
+UBOOT_BUILD_DIR=""
+UBOOT_CONFIG=""
 DTB=""
 DTB_ADDR=""
-XIP_IMAGE=""
-XIP_IMAGE_ADDR=""
+UIMAGE=""
 
 check_file_nonempty "$OPENOCD"
 check_dir "$OPENOCD_SCRIPTS"
 if [[ "$MODE" == "flash" ]]; then
     check_file_nonempty "$BR_CONFIG"
 
-    BOOTLOADER="$(find_unique_glob "$IMAGES_DIR/stm32f429i-disco.bin" "image afboot STM32")"
-    DTB_NAME="$(require_config_value "$BR_CONFIG" BR2_LINUX_KERNEL_INTREE_DTS_NAME)"
+    uclinux_stm32_uboot_configured "$BR_CONFIG" \
+        || die "la configuration active ne sélectionne pas le U-Boot Buildroot attendu."
+    UBOOT_IMAGE="$IMAGES_DIR/u-boot.bin"
+    UIMAGE="$IMAGES_DIR/uImage"
+    DTB_NAME="$(uclinux_stm32_dtb_name "$BR_CONFIG")" \
+        || die "nom du DTB STM32 introuvable dans la configuration Buildroot"
     [[ "$DTB_NAME" != *" "* ]] || die "plusieurs DTB configurés ; utilisez --output avec une configuration STM32 dédiée"
     DTB="$IMAGES_DIR/${DTB_NAME##*/}.dtb"
-    XIP_IMAGE_NAME="$(config_value "$BR_CONFIG" BR2_LINUX_KERNEL_IMAGE_NAME)"
-    [[ -n "$XIP_IMAGE_NAME" ]] || XIP_IMAGE_NAME="$(require_config_value "$BR_CONFIG" BR2_LINUX_KERNEL_IMAGE_TARGET_NAME)"
-    XIP_IMAGE="$IMAGES_DIR/$XIP_IMAGE_NAME"
 
-    check_file_nonempty "$BOOTLOADER"
+    check_file_nonempty "$UBOOT_IMAGE"
     check_file_nonempty "$DTB"
-    check_file_nonempty "$XIP_IMAGE"
+    check_file_nonempty "$UIMAGE"
 
-    BOOTLOADER_BASE="${BOOTLOADER##*/}"
-    BOOTLOADER_BASE="${BOOTLOADER_BASE%.bin}"
-    AFBOOT_BUILD_DIR="$(find_unique_glob "$STM32_OUT/build/afboot-stm32-*" "répertoire de build afboot")"
-    AFBOOT_LINKER_SCRIPT="$(afboot_linker_script "$AFBOOT_BUILD_DIR/Makefile" "$BOOTLOADER_BASE")"
+    UBOOT_BUILD_DIR="$(find_unique_glob "$STM32_OUT/build/uboot-*" "répertoire de build U-Boot")"
+    UBOOT_CONFIG="$UBOOT_BUILD_DIR/.config"
+    check_file_nonempty "$UBOOT_CONFIG"
+    [[ "$(config_value "$UBOOT_CONFIG" CONFIG_ENV_ADDR)" == "$STM32_UBOOT_ENV_ADDR" ]] \
+        || die "adresse de l'environnement U-Boot incohérente."
+    [[ "$(config_value "$UBOOT_CONFIG" CONFIG_ENV_SECT_SIZE)" == 0x20000 ]] \
+        || die "taille du secteur d'environnement U-Boot incohérente."
+
     LINUX_CONFIG="$(find_linux_config "$BR_CONFIG")"
-    BOOTLOADER_ADDR="$(linker_flash_origin "$AFBOOT_LINKER_SCRIPT")"
-    DTB_ADDR="$(normalize_address "$(require_config_value "$BR_CONFIG" BR2_TARGET_AFBOOT_STM32_DTB_ADDR)")"
-    XIP_IMAGE_ADDR="$(normalize_address "$(require_config_value "$LINUX_CONFIG" CONFIG_XIP_PHYS_ADDR)")"
-    AFBOOT_KERNEL_ADDR="$(config_value "$BR_CONFIG" BR2_TARGET_AFBOOT_STM32_KERNEL_ADDR)"
-    if [[ -n "$AFBOOT_KERNEL_ADDR" && "$(normalize_address "$AFBOOT_KERNEL_ADDR")" != "$XIP_IMAGE_ADDR" ]]; then
-        die "adresse noyau incohérente : CONFIG_XIP_PHYS_ADDR=$XIP_IMAGE_ADDR mais BR2_TARGET_AFBOOT_STM32_KERNEL_ADDR=$(normalize_address "$AFBOOT_KERNEL_ADDR")"
-    fi
+    [[ "$(normalize_address "$(require_config_value "$LINUX_CONFIG" CONFIG_XIP_PHYS_ADDR)")" == "$STM32_XIP_ADDR" ]] \
+        || die "adresse XIP Linux incohérente."
+    DTB_ADDR="$(normalize_address "$STM32_DTB_ADDR")"
+
+    check_image_before U-Boot "$UBOOT_IMAGE" "$STM32_UBOOT_ADDR" environnement "$STM32_UBOOT_ENV_ADDR"
+    check_image_before uImage "$UIMAGE" "$STM32_UIMAGE_ADDR" DTB "$DTB_ADDR"
+    check_image_before DTB "$DTB" "$DTB_ADDR" "fin de la Flash" "$STM32_FLASH_END"
 fi
 
 if [[ -z "$LOG_FILE" ]]; then
@@ -308,16 +299,27 @@ else
         -c "reset init"
         -c "flash probe 0"
         -c "flash info 0"
-        -c "flash write_image erase $BOOTLOADER $BOOTLOADER_ADDR"
-        -c "flash write_image erase $DTB $DTB_ADDR"
-        -c "flash write_image erase $XIP_IMAGE $XIP_IMAGE_ADDR"
+        -c "flash erase_sector 0 0 4"
+    )
+
+    if ((RESET_ENV)); then
+        OPENOCD_CMD+=( -c "flash erase_sector 0 5 5" )
+    fi
+
+    # Erase the image area once, then write all images without per-file erase.
+    # This remains correct when two images share a physical erase sector.
+    OPENOCD_CMD+=(
+        -c "flash erase_sector 0 6 23"
+        -c "flash write_image $UBOOT_IMAGE $STM32_UBOOT_ADDR bin"
+        -c "flash write_image $UIMAGE $STM32_UIMAGE_ADDR bin"
+        -c "flash write_image $DTB $DTB_ADDR bin"
     )
 
     if ((VERIFY)); then
         OPENOCD_CMD+=(
-            -c "verify_image $BOOTLOADER $BOOTLOADER_ADDR"
-            -c "verify_image $DTB $DTB_ADDR"
-            -c "verify_image $XIP_IMAGE $XIP_IMAGE_ADDR"
+            -c "verify_image $UBOOT_IMAGE $STM32_UBOOT_ADDR bin"
+            -c "verify_image $UIMAGE $STM32_UIMAGE_ADDR bin"
+            -c "verify_image $DTB $DTB_ADDR bin"
         )
     fi
 
@@ -331,7 +333,7 @@ if [[ "$MODE" == "probe" ]]; then
     info "Test OpenOCD de la carte STM32 depuis $STM32_OUT ; aucune écriture Flash."
 else
     info "Flashage de l'image STM32 depuis $STM32_OUT"
-    info "Plan Flash : afboot=$BOOTLOADER_ADDR, dtb=$DTB_ADDR, noyau=$XIP_IMAGE_ADDR"
+    info "Plan Flash : U-Boot=$STM32_UBOOT_ADDR, env=$STM32_UBOOT_ENV_ADDR (préservé=$((1 - RESET_ENV))), uImage=$STM32_UIMAGE_ADDR, DTB=$DTB_ADDR"
 fi
 info "Configuration OpenOCD : board/$BOARD_NAME.cfg"
 info "Journal OpenOCD : $LOG_FILE"
