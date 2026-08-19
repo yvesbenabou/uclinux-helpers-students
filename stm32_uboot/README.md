@@ -22,6 +22,6 @@ reset
 printenv student_name
 ```
 
-The build refuses images that leave less than 100 KiB for student rootfs
-growth. On the initramfs branch this is space before the DTB; on the ROMFS
-branch it is space between the current ROMFS image and the DTB.
+The reference build reports at least 100 KiB before the DTB for student
+initramfs growth. The build warns as that space is used and rejects only an
+actual overlap.

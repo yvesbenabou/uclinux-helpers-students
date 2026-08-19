@@ -470,6 +470,15 @@ uclinux_stm32_uboot_configured() {
     [[ " $post_image " == *" $asset_dir/post_image.sh "* ]] || return 1
 }
 
+uclinux_stm32_initramfs_configured() {
+    local config=$1
+
+    [[ -s "$config" ]] || return 1
+    grep -Fqx 'BR2_TARGET_ROOTFS_INITRAMFS=y' "$config" || return 1
+    [[ "$(br_config_value "$config" BR2_LINUX_KERNEL_INTREE_DTS_NAME)" == "stm32f429-disco" ]] || return 1
+    [[ -z "$(br_config_value "$config" BR2_LINUX_KERNEL_CUSTOM_DTS_PATH)" ]] || return 1
+}
+
 uclinux_generate_stm32_config() {
     local config_tool="$BUILDROOT_DIR/utils/config"
     local config="$STM32_OUT/.config"
@@ -503,6 +512,8 @@ uclinux_generate_stm32_config() {
 
     grep -q 'BR2_cortex_m4=y' "$config"
     grep -q "BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE=\"$EXPECTED_LINUX_VERSION\"" "$config"
+    uclinux_stm32_initramfs_configured "$config" \
+        || die "la configuration STM32 active n'utilise pas l'initramfs attendu."
     uclinux_stm32_uboot_configured "$config" \
         || die "la configuration STM32 active n'utilise pas le U-Boot Buildroot attendu."
     uclinux_enable_host_environment_setup "$STM32_OUT"

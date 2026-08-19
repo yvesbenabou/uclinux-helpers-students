@@ -46,6 +46,7 @@ uclinux_ensure_stm32_config() {
     if [[ -s "$STM32_OUT/.config" ]] \
         && grep -q 'BR2_cortex_m4=y' "$STM32_OUT/.config" \
         && grep -q "BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE=\"$EXPECTED_LINUX_VERSION\"" "$STM32_OUT/.config" \
+        && uclinux_stm32_initramfs_configured "$STM32_OUT/.config" \
         && uclinux_stm32_uboot_configured "$STM32_OUT/.config"; then
         ok "configuration active STM32 déjà présente : $STM32_OUT/.config"
     else
@@ -84,6 +85,13 @@ uclinux_step_build_stm32() {
         rm -f -- "$STM32_OUT/images/stm32f429i-disco.bin"
         warn "ancienne image afboot supprimée : $STM32_OUT/images/stm32f429i-disco.bin"
     fi
+    STALE_ROMFS_IMAGES=(rootfs.romfs rootfs.tar stm32f429-disco-romfs.dtb)
+    for stale_image in "${STALE_ROMFS_IMAGES[@]}"; do
+        if [[ -e "$STM32_OUT/images/$stale_image" ]]; then
+            rm -f -- "$STM32_OUT/images/$stale_image"
+            warn "ancienne image ROMFS supprimée : $STM32_OUT/images/$stale_image"
+        fi
+    done
 
     DTB_NAME="$(uclinux_stm32_dtb_name "$STM32_OUT/.config")"
     [[ -n "$DTB_NAME" && "$DTB_NAME" != *" "* ]] || die "nom de DTB STM32 invalide : $DTB_NAME"
@@ -146,10 +154,12 @@ uclinux_step_build_stm32() {
         || die "uImage déborde dans le DTB."
     ((DTB_END <= STM32_FLASH_END)) \
         || die "DTB dépasse la Flash interne."
-    ((STUDENT_HEADROOM >= STM32_STUDENT_HEADROOM)) \
-        || die "marge étudiante insuffisante : $STUDENT_HEADROOM octets, minimum $STM32_STUDENT_HEADROOM."
     ok "U-Boot $EXPECTED_UBOOT_VERSION construit par Buildroot, environnement persistant en secteur dédié"
-    ok "marge initramfs étudiante : $STUDENT_HEADROOM octets ($((STUDENT_HEADROOM / 1024)) Kio)"
+    if ((STUDENT_HEADROOM >= STM32_STUDENT_HEADROOM)); then
+        ok "marge initramfs étudiante : $STUDENT_HEADROOM octets ($((STUDENT_HEADROOM / 1024)) Kio)"
+    else
+        warn "marge initramfs restante : $STUDENT_HEADROOM octets, sous la cible initiale de $STM32_STUDENT_HEADROOM"
+    fi
 
     check_file_nonempty "$STM32_OUT/target/bin/busybox"
     ok "BusyBox installé dans le rootfs préparé"
