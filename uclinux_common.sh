@@ -46,10 +46,19 @@ run_logged() {
 }
 : "${BUILDROOT_REF:=2025.08}"
 : "${EXPECTED_LINUX_VERSION:=6.1.133}"
+: "${EXPECTED_UBOOT_VERSION:=2025.07}"
 : "${LINUX_STABLE_GIT_URL:=https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git}"
 : "${WORK_ROOT:=$(uclinux_default_root)}"
-: "${STM32_ROMFS_ADDR:=0x08160000}"
+: "${STM32_UBOOT_ADDR:=0x08000000}"
+: "${STM32_UBOOT_ENV_ADDR:=0x08020000}"
+: "${STM32_UBOOT_ENV_END:=0x08040000}"
+: "${STM32_UIMAGE_ADDR:=0x08040000}"
+: "${STM32_XIP_ADDR:=0x08040040}"
+: "${STM32_ROMFS_ADDR:=0x08180000}"
+: "${STM32_ROMFS_PARTITION_SIZE:=0x0007B000}"
+: "${STM32_DTB_ADDR:=0x081FB000}"
 : "${STM32_FLASH_END:=0x08200000}"
+: "${STM32_STUDENT_HEADROOM:=102400}"
 : "${QUIET:=0}"
 : "${DEBUG_TRACE:=0}"
 : "${RESUME:=1}"
@@ -442,6 +451,27 @@ uclinux_stm32_dtb_name() {
     printf '%s\n' "${custom_path%.dts}"
 }
 
+uclinux_stm32_uboot_configured() {
+    local config=$1
+    local asset_dir="$SCRIPT_DIR/stm32_uboot"
+    local fragments
+    local post_image
+
+    [[ -s "$config" ]] || return 1
+    grep -Fqx '# BR2_TARGET_AFBOOT_STM32 is not set' "$config" || return 1
+    grep -Fqx 'BR2_TARGET_UBOOT=y' "$config" || return 1
+    grep -Fqx "BR2_TARGET_UBOOT_VERSION=\"$EXPECTED_UBOOT_VERSION\"" "$config" || return 1
+    grep -Fqx 'BR2_TARGET_UBOOT_BOARD_DEFCONFIG="stm32f429-discovery"' "$config" || return 1
+    grep -Fqx 'BR2_TARGET_UBOOT_FORMAT_BIN=y' "$config" || return 1
+
+    fragments="$(br_config_value "$config" BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES)"
+    [[ " $fragments " == *" $asset_dir/linux.fragment "* ]] || return 1
+    fragments="$(br_config_value "$config" BR2_TARGET_UBOOT_CONFIG_FRAGMENT_FILES)"
+    [[ " $fragments " == *" $asset_dir/uboot.fragment "* ]] || return 1
+    post_image="$(br_config_value "$config" BR2_ROOTFS_POST_IMAGE_SCRIPT)"
+    [[ " $post_image " == *" $asset_dir/post_image.sh "* ]] || return 1
+}
+
 uclinux_stm32_romfs_configured() {
     local config=$1
     local asset_dir="$SCRIPT_DIR/stm32_romfs"
@@ -469,43 +499,62 @@ uclinux_stm32_romfs_configured() {
 uclinux_generate_stm32_config() {
     local config_tool="$BUILDROOT_DIR/utils/config"
     local config="$STM32_OUT/.config"
-    local asset_dir="$SCRIPT_DIR/stm32_romfs"
+    local romfs_asset_dir="$SCRIPT_DIR/stm32_romfs"
+    local uboot_asset_dir="$SCRIPT_DIR/stm32_uboot"
     local fragments
     local post_build
     local post_fakeroot
+    local post_image
 
     run_with_log "$LOG_DIR/defconfig-stm32-$TIMESTAMP.log" make_br "$STM32_OUT" stm32f429_disco_xip_defconfig
     check_file_nonempty "$config"
     check_file_nonempty "$config_tool"
-    check_file_nonempty "$asset_dir/linux.fragment"
-    check_file_nonempty "$asset_dir/stm32f429-disco-romfs.dts"
-    check_file_nonempty "$asset_dir/post_build.sh"
-    check_file_nonempty "$asset_dir/post_fakeroot.sh"
+    check_file_nonempty "$romfs_asset_dir/linux.fragment"
+    check_file_nonempty "$romfs_asset_dir/stm32f429-disco-romfs.dts"
+    check_file_nonempty "$romfs_asset_dir/post_build.sh"
+    check_file_nonempty "$romfs_asset_dir/post_fakeroot.sh"
+    check_file_nonempty "$uboot_asset_dir/linux.fragment"
+    check_file_nonempty "$uboot_asset_dir/uboot.fragment"
+    check_file_nonempty "$uboot_asset_dir/post_image.sh"
 
-    fragments="$(uclinux_config_append_word "$config" BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES "$asset_dir/linux.fragment")"
-    post_build="$(uclinux_config_append_word "$config" BR2_ROOTFS_POST_BUILD_SCRIPT "$asset_dir/post_build.sh")"
-    post_fakeroot="$(uclinux_config_append_word "$config" BR2_ROOTFS_POST_FAKEROOT_SCRIPT "$asset_dir/post_fakeroot.sh")"
+    fragments="$(uclinux_config_append_word "$config" BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES "$uboot_asset_dir/linux.fragment")"
+    if [[ " $fragments " != *" $romfs_asset_dir/linux.fragment "* ]]; then
+        fragments="$fragments $romfs_asset_dir/linux.fragment"
+    fi
+    post_build="$(uclinux_config_append_word "$config" BR2_ROOTFS_POST_BUILD_SCRIPT "$romfs_asset_dir/post_build.sh")"
+    post_fakeroot="$(uclinux_config_append_word "$config" BR2_ROOTFS_POST_FAKEROOT_SCRIPT "$romfs_asset_dir/post_fakeroot.sh")"
+    post_image="$(uclinux_config_append_word "$config" BR2_ROOTFS_POST_IMAGE_SCRIPT "$uboot_asset_dir/post_image.sh")"
 
-    info "Configuration du rootfs ROMFS STM32 à l'adresse $STM32_ROMFS_ADDR"
+    info "Configuration de U-Boot $EXPECTED_UBOOT_VERSION et du rootfs ROMFS à $STM32_ROMFS_ADDR"
     run_with_log "$LOG_DIR/config-romfs-stm32-$TIMESTAMP.log" \
         "$config_tool" --file "$config" \
+        --disable BR2_TARGET_AFBOOT_STM32 \
+        --enable BR2_TARGET_UBOOT \
+        --enable BR2_TARGET_UBOOT_LATEST_VERSION \
+        --enable BR2_TARGET_UBOOT_USE_DEFCONFIG \
+        --set-str BR2_TARGET_UBOOT_BOARD_DEFCONFIG stm32f429-discovery \
+        --set-str BR2_TARGET_UBOOT_CONFIG_FRAGMENT_FILES "$uboot_asset_dir/uboot.fragment" \
+        --enable BR2_TARGET_UBOOT_FORMAT_BIN \
         --disable BR2_TARGET_ROOTFS_INITRAMFS \
         --disable BR2_TARGET_ROOTFS_CPIO \
         --enable BR2_TARGET_ROOTFS_TAR \
         --enable BR2_TARGET_ROOTFS_TAR_NONE \
         --set-str BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES "$fragments" \
-        --set-str BR2_LINUX_KERNEL_CUSTOM_DTS_PATH "$asset_dir/stm32f429-disco-romfs.dts" \
+        --set-str BR2_LINUX_KERNEL_CUSTOM_DTS_PATH "$romfs_asset_dir/stm32f429-disco-romfs.dts" \
         --set-str BR2_LINUX_KERNEL_INTREE_DTS_NAME "" \
         --set-str BR2_ROOTFS_POST_BUILD_SCRIPT "$post_build" \
-        --set-str BR2_ROOTFS_POST_FAKEROOT_SCRIPT "$post_fakeroot"
+        --set-str BR2_ROOTFS_POST_FAKEROOT_SCRIPT "$post_fakeroot" \
+        --set-str BR2_ROOTFS_POST_IMAGE_SCRIPT "$post_image"
     run_with_log "$LOG_DIR/olddefconfig-romfs-stm32-$TIMESTAMP.log" make_br "$STM32_OUT" olddefconfig
 
     grep -q 'BR2_cortex_m4=y' "$config"
     grep -q "BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE=\"$EXPECTED_LINUX_VERSION\"" "$config"
     uclinux_stm32_romfs_configured "$config" \
         || die "la configuration STM32 active n'utilise pas le rootfs ROMFS attendu."
+    uclinux_stm32_uboot_configured "$config" \
+        || die "la configuration STM32 active n'utilise pas le U-Boot Buildroot attendu."
     uclinux_enable_host_environment_setup "$STM32_OUT"
-    ok "configuration active STM32 générée : xipImage sans initramfs, rootfs ROMFS séparé"
+    ok "configuration active STM32 générée : U-Boot, noyau XIP et rootfs ROMFS séparé"
 }
 
 uclinux_generate_qemu_config() {

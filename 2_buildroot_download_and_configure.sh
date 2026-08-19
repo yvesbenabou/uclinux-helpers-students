@@ -44,7 +44,7 @@ uclinux_check_buildroot_defconfigs() {
     grep -q 'BR2_TARGET_ROOTFS_INITRAMFS=y' "$STM32_DEFCONFIG" || die "initramfs absent du defconfig STM32 de référence."
     grep -q 'BR2_TARGET_AFBOOT_STM32=y' "$STM32_DEFCONFIG" || die "afboot-stm32 non sélectionné."
     grep -q 'BR2_PACKAGE_HOST_OPENOCD=y' "$STM32_DEFCONFIG" || die "OpenOCD hôte non sélectionné."
-    ok "defconfig STM32 de référence reconnu ; la configuration active remplacera son initramfs par ROMFS"
+    ok "defconfig STM32 de référence reconnu ; la configuration active utilisera U-Boot et ROMFS"
 }
 
 uclinux_step_buildroot_download_and_configure() {
