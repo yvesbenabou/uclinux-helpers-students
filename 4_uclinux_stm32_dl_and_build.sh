@@ -117,6 +117,10 @@ uclinux_step_build_stm32() {
             warn "ancienne image CPIO supprimée : $STM32_OUT/images/$stale_image"
         fi
     done
+    if [[ -e "$STM32_OUT/images/stm32f429-disco.dtb" ]]; then
+        rm -f -- "$STM32_OUT/images/stm32f429-disco.dtb"
+        warn "ancien DTB initramfs supprimé : $STM32_OUT/images/stm32f429-disco.dtb"
+    fi
 
     DTB_NAME="$(uclinux_stm32_dtb_name "$STM32_OUT/.config")"
     [[ -n "$DTB_NAME" && "$DTB_NAME" != *" "* ]] || die "nom de DTB STM32 invalide : $DTB_NAME"
