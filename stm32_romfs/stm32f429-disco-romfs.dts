@@ -7,10 +7,21 @@
 };
 
 / {
-	romfs@8160000 {
+	flash@8000000 {
 		compatible = "mtd-rom";
-		reg = <0x08160000 0x000a0000>;
+		reg = <0x08000000 0x00200000>;
 		bank-width = <4>;
-		linux,mtd-name = "rootfs";
+
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			partition@160000 {
+				label = "rootfs";
+				reg = <0x00160000 0x000a0000>;
+				read-only;
+			};
+		};
 	};
 };

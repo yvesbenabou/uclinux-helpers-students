@@ -79,6 +79,14 @@ uclinux_step_build_stm32() {
         run_with_log "$LOG_DIR/build-stm32-$TIMESTAMP.log" make_br "$STM32_OUT" -j"$JOBS"
     fi
 
+    # The U-Boot branches deliberately remove stale afboot images. Buildroot
+    # may still consider afboot installed when returning to this branch, so
+    # reinstall its images component when the expected binary is absent.
+    if [[ ! -s "$STM32_OUT/images/stm32f429i-disco.bin" ]]; then
+        run_with_log "$LOG_DIR/reinstall-afboot-stm32-$TIMESTAMP.log" \
+            make_br "$STM32_OUT" afboot-stm32-reinstall
+    fi
+
     # A previous initramfs build can leave an obsolete image behind even after
     # CPIO generation is disabled. Do not present or accidentally flash it.
     STALE_CPIO_IMAGES=(
@@ -122,6 +130,7 @@ uclinux_step_build_stm32() {
     grep -qx 'CONFIG_MTD_ROM=y' "$KERNEL_CONFIG" || die "CONFIG_MTD_ROM n'est pas actif."
     grep -qx 'CONFIG_MTD_PHYSMAP=y' "$KERNEL_CONFIG" || die "CONFIG_MTD_PHYSMAP n'est pas actif."
     grep -qx 'CONFIG_MTD_PHYSMAP_OF=y' "$KERNEL_CONFIG" || die "CONFIG_MTD_PHYSMAP_OF n'est pas actif."
+    grep -qx 'CONFIG_MTD_OF_PARTS=y' "$KERNEL_CONFIG" || die "le parseur de partitions MTD du DT n'est pas actif."
     grep -qx 'CONFIG_ROMFS_FS=y' "$KERNEL_CONFIG" || die "CONFIG_ROMFS_FS n'est pas actif."
     grep -qx 'CONFIG_ROMFS_BACKED_BY_MTD=y' "$KERNEL_CONFIG" || die "ROMFS n'utilise pas directement MTD."
     ok "noyau Linux $EXPECTED_LINUX_VERSION : ARM, no-MMU, XIP, ROMFS sur MTD, sans initramfs"
@@ -134,11 +143,20 @@ uclinux_step_build_stm32() {
     ROMFS_SIZE="$(stat -c %s "$ROMFS_IMAGE")"
     XIP_END=$((XIP_ADDR + XIP_SIZE))
     ROMFS_END=$((STM32_ROMFS_ADDR + ROMFS_SIZE))
+    ROMFS_PARTITION_END=$((STM32_ROMFS_ADDR + STM32_ROMFS_PARTITION_SIZE))
+    STUDENT_HEADROOM=$((ROMFS_PARTITION_END - ROMFS_END))
+    ((ROMFS_PARTITION_END == STM32_FLASH_END)) \
+        || die "la partition ROMFS ne couvre pas exactement la fin de la Flash."
     ((XIP_END <= STM32_ROMFS_ADDR)) \
         || die "xipImage déborde dans ROMFS : fin=0x$(printf '%08X' "$XIP_END"), ROMFS=$STM32_ROMFS_ADDR"
-    ((ROMFS_END <= STM32_FLASH_END)) \
-        || die "ROMFS dépasse la Flash : fin=0x$(printf '%08X' "$ROMFS_END"), limite=$STM32_FLASH_END"
+    ((ROMFS_END <= ROMFS_PARTITION_END)) \
+        || die "ROMFS dépasse sa partition : fin=0x$(printf '%08X' "$ROMFS_END"), limite=0x$(printf '%08X' "$ROMFS_PARTITION_END")"
     ok "plan Flash sans recouvrement : noyau $(printf '0x%08X-0x%08X' "$((XIP_ADDR))" "$XIP_END"), ROMFS $(printf '0x%08X-0x%08X' "$((STM32_ROMFS_ADDR))" "$ROMFS_END")"
+    if ((STUDENT_HEADROOM >= STM32_STUDENT_HEADROOM)); then
+        ok "marge ROMFS étudiante : $STUDENT_HEADROOM octets ($((STUDENT_HEADROOM / 1024)) Kio)"
+    else
+        warn "marge ROMFS restante : $STUDENT_HEADROOM octets, sous la cible de $STM32_STUDENT_HEADROOM"
+    fi
 
     check_file_nonempty "$STM32_OUT/target/bin/busybox"
     ok "BusyBox installé dans le rootfs préparé"
@@ -162,8 +180,12 @@ uclinux_step_build_stm32() {
     grep -q '/dts-v1/' "$DT_DUMP" || die "le DTB n'a pas pu être décompilé correctement."
     grep -q 'bootargs = "root=mtd0 rootfstype=romfs ro";' "$DT_DUMP" || die "bootargs ROMFS absents du DTB."
     grep -q 'compatible = "mtd-rom";' "$DT_DUMP" || die "nœud mtd-rom absent du DTB."
-    grep -q 'romfs@8160000' "$DT_DUMP" || die "adresse ROMFS $STM32_ROMFS_ADDR absente du DTB."
-    ok "DTB valide : root=mtd0, ROMFS direct à $STM32_ROMFS_ADDR ; décompilation dans $DT_DUMP"
+    grep -q 'flash@8000000' "$DT_DUMP" || die "mapping de la Flash interne complète absent du DTB."
+    grep -q 'reg = <0x8000000 0x200000>;' "$DT_DUMP" || die "taille du mapping Flash incorrecte dans le DTB."
+    grep -q 'compatible = "fixed-partitions";' "$DT_DUMP" || die "partitions MTD fixes absentes du DTB."
+    grep -q 'partition@160000' "$DT_DUMP" || die "partition rootfs à $STM32_ROMFS_ADDR absente du DTB."
+    grep -q 'reg = <0x160000 0xa0000>;' "$DT_DUMP" || die "taille de la partition rootfs incorrecte dans le DTB."
+    ok "DTB valide : Flash complète et partition rootfs exacte, sans arrondi physmap ; décompilation dans $DT_DUMP"
     mark_step_completed "build-stm32" "$STM32_BUILD_FINGERPRINT"
 
     printf '\nImages STM32 générées :\n'
