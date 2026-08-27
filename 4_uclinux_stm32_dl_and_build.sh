@@ -52,6 +52,24 @@ ramfs_payload_bytes() {
     printf '%s\n' "$((regular_bytes + symlink_count * 4096))"
 }
 
+uclinux_repair_relocated_host_fakeroot() {
+    local out=$1
+    local fakeroot="$out/host/bin/fakeroot"
+    local expected_prefix="FAKEROOT_PREFIX=$out/host"
+    local target
+
+    [[ -f "$fakeroot" ]] || return 0
+    grep -Fqx "$expected_prefix" "$fakeroot" && return 0
+
+    target="$(basename "$out")"
+    warn "fakeroot hôte contient un ancien chemin Buildroot ; reconstruction pour $target"
+    run_with_log "$LOG_DIR/rebuild-host-fakeroot-$target-$TIMESTAMP.log" \
+        make_br "$out" host-fakeroot-dirclean host-fakeroot
+    grep -Fqx "$expected_prefix" "$fakeroot" \
+        || die "fakeroot hôte utilise encore un préfixe incorrect : $fakeroot"
+    ok "fakeroot hôte réparé pour $target"
+}
+
 uclinux_step_build_stm32() {
     local asset_dir="$SCRIPT_DIR/stm32_romfs"
 
@@ -59,6 +77,7 @@ uclinux_step_build_stm32() {
     uclinux_require_buildroot
     uclinux_ensure_stm32_config
     uclinux_enable_host_environment_setup "$STM32_OUT"
+    uclinux_repair_relocated_host_fakeroot "$STM32_OUT"
     prepare_linux_override "$STM32_OUT"
 
     section "Construction complète STM32F429I-DISC1"
