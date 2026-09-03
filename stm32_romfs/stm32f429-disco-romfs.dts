@@ -17,9 +17,9 @@
 			#address-cells = <1>;
 			#size-cells = <1>;
 
-			partition@160000 {
+			partition@1a0000 {
 				label = "rootfs";
-				reg = <0x00160000 0x000a0000>;
+				reg = <0x001a0000 0x00060000>;
 				read-only;
 			};
 		};

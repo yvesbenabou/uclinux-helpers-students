@@ -31,6 +31,28 @@ mv -f "$fstab_tmp" "$fstab"
 # seedrng persists a seed below /var/lib; that location is intentionally
 # read-only in this small ROMFS setup.
 rm -f "$target_dir/etc/init.d/S01seedrng"
+rm -f "$target_dir/etc/services" "$target_dir/etc/protocols"
+rm -f "$target_dir/THIS_IS_NOT_YOUR_ROOT_FILESYSTEM"
+
+# BusyBox does not remove links belonging to applets disabled after an earlier
+# incremental build. Remove only links that still point at its binary.
+for applet in \
+    cksum crc32 sha1sum sha256sum sha512sum sha3sum \
+    mke2fs mkdosfs getfattr lsscsi partprobe setfattr \
+    nl ascii factor fallocate hostid svc svok w uudecode uuencode \
+    linux32 linux64 mim adduser fsfreeze seedrng bc setserial \
+    zcat bzcat lzcat xzcat unlzop lzopcat \
+    i2ctransfer start-stop-daemon run-init resume nuke freeramdisk \
+    hexedit od shred install setpriv nologin passwd; do
+    for applet_dir in bin sbin usr/bin usr/sbin; do
+        applet_path="$target_dir/$applet_dir/$applet"
+        if test -L "$applet_path"; then
+            case "$(readlink "$applet_path")" in
+                *busybox) rm -f "$applet_path" ;;
+            esac
+        fi
+    done
+done
 
 grep -q '^mtd0[[:space:]]\+/[[:space:]]\+romfs[[:space:]]\+ro,noauto' "$fstab"
 test "$(grep -c '[[:space:]]ramfs[[:space:]]' "$fstab")" -eq 3

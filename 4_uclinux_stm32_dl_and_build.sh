@@ -85,6 +85,7 @@ uclinux_step_build_stm32() {
         "$SCRIPT_DIR/4_uclinux_stm32_dl_and_build.sh" \
         "$SCRIPT_DIR/uclinux_common.sh" \
         "$asset_dir/linux.fragment" \
+        "$asset_dir/busybox.fragment" \
         "$asset_dir/stm32f429-disco-romfs.dts" \
         "$asset_dir/post_build.sh" \
         "$asset_dir/post_fakeroot.sh")"
@@ -152,7 +153,12 @@ uclinux_step_build_stm32() {
     grep -qx 'CONFIG_MTD_OF_PARTS=y' "$KERNEL_CONFIG" || die "le parseur de partitions MTD du DT n'est pas actif."
     grep -qx 'CONFIG_ROMFS_FS=y' "$KERNEL_CONFIG" || die "CONFIG_ROMFS_FS n'est pas actif."
     grep -qx 'CONFIG_ROMFS_BACKED_BY_MTD=y' "$KERNEL_CONFIG" || die "ROMFS n'utilise pas directement MTD."
-    ok "noyau Linux $EXPECTED_LINUX_VERSION : ARM, no-MMU, XIP, ROMFS sur MTD, sans initramfs"
+    grep -qx 'CONFIG_PM=y' "$KERNEL_CONFIG" || die "le runtime PM requis par le pilote LTDC n'est pas actif."
+    grep -qx 'CONFIG_SPI_STM32=y' "$KERNEL_CONFIG" || die "le contrôleur SPI STM32 n'est pas actif."
+    grep -qx 'CONFIG_DRM_STM=y' "$KERNEL_CONFIG" || die "le pilote DRM LTDC STM32 n'est pas actif."
+    grep -qx 'CONFIG_DRM_PANEL_ILITEK_ILI9341=y' "$KERNEL_CONFIG" || die "le pilote de dalle ILI9341 n'est pas actif."
+    grep -qx 'CONFIG_DRM_FBDEV_EMULATION=y' "$KERNEL_CONFIG" || die "l'émulation fbdev DRM n'est pas active."
+    ok "noyau Linux $EXPECTED_LINUX_VERSION : ARM, no-MMU, XIP, ROMFS sur MTD, LTDC/ILI9341 avec /dev/fb0"
 
     ROMFS_MAGIC="$(dd if="$ROMFS_IMAGE" bs=8 count=1 2>/dev/null)"
     [[ "$ROMFS_MAGIC" == '-rom1fs-' ]] || die "signature ROMFS invalide : $ROMFS_IMAGE"
@@ -178,6 +184,24 @@ uclinux_step_build_stm32() {
     fi
 
     check_file_nonempty "$STM32_OUT/target/bin/busybox"
+    for removed_applet in \
+        cksum crc32 sha1sum sha256sum sha512sum sha3sum \
+        mke2fs mkdosfs getfattr lsscsi partprobe setfattr \
+        nl ascii factor fallocate hostid svc svok w uudecode uuencode \
+        linux32 linux64 mim adduser fsfreeze seedrng bc setserial \
+        zcat bzcat lzcat xzcat unlzop lzopcat \
+        i2ctransfer start-stop-daemon run-init resume nuke freeramdisk \
+        hexedit od shred install setpriv nologin passwd; do
+        [[ ! -e "$STM32_OUT/target/bin/$removed_applet" \
+            && ! -e "$STM32_OUT/target/sbin/$removed_applet" \
+            && ! -e "$STM32_OUT/target/usr/bin/$removed_applet" \
+            && ! -e "$STM32_OUT/target/usr/sbin/$removed_applet" ]] \
+            || die "applet BusyBox inutile encore présent : $removed_applet"
+    done
+    for removed_file in etc/services etc/protocols THIS_IS_NOT_YOUR_ROOT_FILESYSTEM; do
+        [[ ! -e "$STM32_OUT/target/$removed_file" ]] \
+            || die "fichier ROMFS inutile encore présent : $removed_file"
+    done
     ok "BusyBox installé dans le rootfs préparé"
     RAMFS_BYTES="$(ramfs_payload_bytes "$STM32_OUT/target")"
     printf 'Pages de données ramfs évitées : %d octets (%d Kio, %.2f Mio), hors métadonnées inode/dentry.\n' \
@@ -202,8 +226,8 @@ uclinux_step_build_stm32() {
     grep -q 'flash@8000000' "$DT_DUMP" || die "mapping de la Flash interne complète absent du DTB."
     grep -q 'reg = <0x8000000 0x200000>;' "$DT_DUMP" || die "taille du mapping Flash incorrecte dans le DTB."
     grep -q 'compatible = "fixed-partitions";' "$DT_DUMP" || die "partitions MTD fixes absentes du DTB."
-    grep -q 'partition@160000' "$DT_DUMP" || die "partition rootfs à $STM32_ROMFS_ADDR absente du DTB."
-    grep -q 'reg = <0x160000 0xa0000>;' "$DT_DUMP" || die "taille de la partition rootfs incorrecte dans le DTB."
+    grep -q 'partition@1a0000' "$DT_DUMP" || die "partition rootfs à $STM32_ROMFS_ADDR absente du DTB."
+    grep -q 'reg = <0x1a0000 0x60000>;' "$DT_DUMP" || die "taille de la partition rootfs incorrecte dans le DTB."
     ok "DTB valide : Flash complète et partition rootfs exacte, sans arrondi physmap ; décompilation dans $DT_DUMP"
     mark_step_completed "build-stm32" "$STM32_BUILD_FINGERPRINT"
 
