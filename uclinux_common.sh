@@ -346,7 +346,9 @@ step_fingerprint() {
     local rc
 
     debug_enter "$__fn"
+    shift
     [[ -f "$out/local.mk" ]] && files+=("$out/local.mk")
+    files+=("$@")
     sha256sum "${files[@]}" | sha256sum | awk '{print $1}'
     rc=${PIPESTATUS[0]}
     debug_exit "$__fn" "$rc"
@@ -406,13 +408,70 @@ uclinux_enable_host_environment_setup() {
     ok "environment-setup hôte activé pour $target"
 }
 
+
+uclinux_config_append_word() {
+    local config=$1
+    local key=$2
+    local word=$3
+    local words
+
+    words="$(br_config_value "$config" "$key")"
+    case " $words " in
+        *" $word "*) printf '%s\n' "$words" ;;
+        "  ") printf '%s\n' "$word" ;;
+        *) printf '%s %s\n' "$words" "$word" ;;
+    esac
+}
+
+uclinux_stm32_fb_configured() {
+    local config=$1
+    local asset_dir="$SCRIPT_DIR/stm32_initramfs_fb"
+    local fragments
+    local busybox_fragments
+    local post_build
+
+    [[ -s "$config" ]] || return 1
+    grep -Fqx 'BR2_TARGET_ROOTFS_INITRAMFS=y' "$config" || return 1
+    grep -Fqx 'BR2_TARGET_AFBOOT_STM32=y' "$config" || return 1
+    fragments="$(br_config_value "$config" BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES)"
+    busybox_fragments="$(br_config_value "$config" BR2_PACKAGE_BUSYBOX_CONFIG_FRAGMENT_FILES)"
+    post_build="$(br_config_value "$config" BR2_ROOTFS_POST_BUILD_SCRIPT)"
+    [[ " $fragments " == *" $asset_dir/linux.fragment "* ]] || return 1
+    [[ " $busybox_fragments " == *" $asset_dir/busybox.fragment "* ]] || return 1
+    [[ " $post_build " == *" $asset_dir/post_build.sh "* ]] || return 1
+}
+
 uclinux_generate_stm32_config() {
+    local config_tool="$BUILDROOT_DIR/utils/config"
+    local config="$STM32_OUT/.config"
+    local asset_dir="$SCRIPT_DIR/stm32_initramfs_fb"
+    local fragments
+    local busybox_fragments
+    local post_build
+
     run_with_log "$LOG_DIR/defconfig-stm32-$TIMESTAMP.log" make_br "$STM32_OUT" stm32f429_disco_xip_defconfig
-    check_file_nonempty "$STM32_OUT/.config"
-    grep -q 'BR2_cortex_m4=y' "$STM32_OUT/.config"
-    grep -q "BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE=\"$EXPECTED_LINUX_VERSION\"" "$STM32_OUT/.config"
+    check_file_nonempty "$config"
+    check_file_nonempty "$config_tool"
+    check_file_nonempty "$asset_dir/linux.fragment"
+    check_file_nonempty "$asset_dir/busybox.fragment"
+    check_file_nonempty "$asset_dir/post_build.sh"
+
+    fragments="$(uclinux_config_append_word "$config" BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES "$asset_dir/linux.fragment")"
+    busybox_fragments="$(uclinux_config_append_word "$config" BR2_PACKAGE_BUSYBOX_CONFIG_FRAGMENT_FILES "$asset_dir/busybox.fragment")"
+    post_build="$(uclinux_config_append_word "$config" BR2_ROOTFS_POST_BUILD_SCRIPT "$asset_dir/post_build.sh")"
+    run_with_log "$LOG_DIR/config-fb-stm32-$TIMESTAMP.log" \
+        "$config_tool" --file "$config" \
+        --set-str BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES "$fragments" \
+        --set-str BR2_PACKAGE_BUSYBOX_CONFIG_FRAGMENT_FILES "$busybox_fragments" \
+        --set-str BR2_ROOTFS_POST_BUILD_SCRIPT "$post_build"
+    run_with_log "$LOG_DIR/olddefconfig-fb-stm32-$TIMESTAMP.log" make_br "$STM32_OUT" olddefconfig
+
+    grep -q 'BR2_cortex_m4=y' "$config"
+    grep -q "BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE=\"$EXPECTED_LINUX_VERSION\"" "$config"
+    uclinux_stm32_fb_configured "$config" \
+        || die "la configuration STM32 active n'utilise pas les fragments framebuffer/initramfs attendus."
     uclinux_enable_host_environment_setup "$STM32_OUT"
-    ok "configuration active STM32 générée dans $STM32_OUT/.config"
+    ok "configuration active STM32 générée : afboot, initramfs et framebuffer"
 }
 
 uclinux_generate_qemu_config() {

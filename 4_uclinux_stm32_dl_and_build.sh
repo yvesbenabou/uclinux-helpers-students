@@ -31,7 +31,8 @@ linux_build_dir() {
 uclinux_ensure_stm32_config() {
     if [[ -s "$STM32_OUT/.config" ]] \
         && grep -q 'BR2_cortex_m4=y' "$STM32_OUT/.config" \
-        && grep -q "BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE=\"$EXPECTED_LINUX_VERSION\"" "$STM32_OUT/.config"; then
+        && grep -q "BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE=\"$EXPECTED_LINUX_VERSION\"" "$STM32_OUT/.config" \
+        && uclinux_stm32_fb_configured "$STM32_OUT/.config"; then
         ok "configuration active STM32 déjà présente : $STM32_OUT/.config"
     else
         uclinux_generate_stm32_config
@@ -40,6 +41,7 @@ uclinux_ensure_stm32_config() {
 
 
 uclinux_step_build_stm32() {
+    local asset_dir="$SCRIPT_DIR/stm32_initramfs_fb"
     section "Préparation des sources Linux STM32"
     uclinux_require_buildroot
     uclinux_ensure_stm32_config
@@ -47,10 +49,11 @@ uclinux_step_build_stm32() {
     prepare_linux_override "$STM32_OUT"
 
     section "Construction complète STM32F429I-DISC1"
-    STM32_BUILD_FINGERPRINT="$(step_fingerprint "$STM32_OUT")"
+    STM32_BUILD_FINGERPRINT="$(step_fingerprint "$STM32_OUT" "$SCRIPT_DIR/4_uclinux_stm32_dl_and_build.sh" "$SCRIPT_DIR/uclinux_common.sh" "$asset_dir/linux.fragment" "$asset_dir/busybox.fragment" "$asset_dir/post_build.sh")"
     if step_completed "build-stm32" "$STM32_BUILD_FINGERPRINT"; then
         ok "étape déjà validée, make STM32 ignoré (--force pour la relancer)"
     else
+        run_with_log "$LOG_DIR/reconfigure-linux-stm32-$TIMESTAMP.log" make_br "$STM32_OUT" linux-reconfigure
         run_with_log "$LOG_DIR/build-stm32-$TIMESTAMP.log" make_br "$STM32_OUT" -j"$JOBS"
     fi
 
@@ -74,6 +77,21 @@ uclinux_step_build_stm32() {
     grep -q '^CONFIG_INITRAMFS_SOURCE=' "$KERNEL_CONFIG" || die "aucune source initramfs dans la configuration noyau."
     ok "noyau Linux $EXPECTED_LINUX_VERSION : ARM, no-MMU, XIP, initramfs"
 
+    grep -qx 'CONFIG_PM=y' "$KERNEL_CONFIG" || die "le runtime PM requis par LTDC n'est pas actif."
+    grep -qx 'CONFIG_SPI_STM32=y' "$KERNEL_CONFIG" || die "le contrôleur SPI STM32 n'est pas actif."
+    grep -qx 'CONFIG_DRM_STM=y' "$KERNEL_CONFIG" || die "le pilote DRM LTDC STM32 n'est pas actif."
+    grep -qx 'CONFIG_DRM_PANEL_ILITEK_ILI9341=y' "$KERNEL_CONFIG" || die "le pilote ILI9341 n'est pas actif."
+    grep -qx 'CONFIG_DRM_FBDEV_EMULATION=y' "$KERNEL_CONFIG" || die "l'émulation fbdev DRM n'est pas active."
+    ok "LTDC, SPI5, ILI9341 et /dev/fb0 activés"
+
+    XIP_IMAGE="$STM32_OUT/images/xipImage"
+    XIP_SIZE="$(stat -c %s "$XIP_IMAGE")"
+    XIP_LIMIT=$((0x08200000 - 0x0800C000))
+    XIP_HEADROOM=$((XIP_LIMIT - XIP_SIZE))
+    printf 'xipImage : %d octets ; capacité depuis 0x0800C000 : %d octets ; marge : %d octets\n' \
+        "$XIP_SIZE" "$XIP_LIMIT" "$XIP_HEADROOM"
+    ((XIP_HEADROOM >= 0)) \
+        || die "xipImage dépasse la Flash STM32F429 de $((-XIP_HEADROOM)) octets."
     check_file_nonempty "$STM32_OUT/target/bin/busybox"
     ok "BusyBox installé dans le rootfs préparé"
 
