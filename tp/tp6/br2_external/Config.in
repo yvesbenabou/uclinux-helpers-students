@@ -1,0 +1,2 @@
+source "$BR2_EXTERNAL_UCLINUX_TP_PATH/package/my_hello/Config.in"
+source "$BR2_EXTERNAL_UCLINUX_TP_PATH/package/fb-test-app-minimal/Config.in"

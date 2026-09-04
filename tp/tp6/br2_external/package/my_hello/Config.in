@@ -1,0 +1,4 @@
+config BR2_PACKAGE_MY_HELLO
+	bool "my_hello"
+	help
+	  Petit programme de démonstration

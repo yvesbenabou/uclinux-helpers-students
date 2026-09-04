@@ -1,0 +1,6 @@
+config BR2_PACKAGE_FB_TEST_APP_MINIMAL
+    bool "fb-test-app-minimal"
+    select BR2_PACKAGE_FB_TEST_APP
+    help
+      Install the standard fb-test-app package, but keep only
+      /usr/bin/fb-test in the target root filesystem.
