@@ -43,7 +43,10 @@ for applet in \
     linux32 linux64 mim adduser fsfreeze seedrng bc setserial \
     zcat bzcat lzcat xzcat unlzop lzopcat \
     i2ctransfer start-stop-daemon run-init resume nuke freeramdisk \
-    hexedit od shred install setpriv nologin passwd; do
+    hexedit od shred install setpriv nologin passwd fold md5sum paste \
+    nproc unix2dos truncate mesg tsort dos2unix expr logname who ts \
+    unlink logname killall5 chroot poweroff halt \
+    egrep fgrep link base32 nice arch; do
     for applet_dir in bin sbin usr/bin usr/sbin; do
         applet_path="$target_dir/$applet_dir/$applet"
         if test -L "$applet_path"; then
