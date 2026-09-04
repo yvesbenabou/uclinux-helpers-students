@@ -31,7 +31,7 @@ index 7795c4126..e723d312c 100644
  obj-$(CONFIG_FB_VIRTUAL)          += vfb.o
 diff --git a/drivers/video/fbdev/stm32f429-disco-simplefb.c b/drivers/video/fbdev/stm32f429-disco-simplefb.c
 new file mode 100644
-index 000000000..b8ce2a6d1
+index 000000000..e846c267d
 --- /dev/null
 +++ b/drivers/video/fbdev/stm32f429-disco-simplefb.c
 @@ -0,0 +1,359 @@
@@ -51,10 +51,10 @@ index 000000000..b8ce2a6d1
 +#include <linux/spi/spi.h>
 +
 +#define FB_PHYS                 0x907d8000
-+#define FB_SIZE                 0x00028000
 +#define FB_WIDTH                240
 +#define FB_HEIGHT               320
-+#define FB_STRIDE               (FB_WIDTH *2) //16 bits per px
++#define FB_STRIDE               (FB_WIDTH * 2) // 16 bits per pixel
++#define FB_SIZE                 (FB_STRIDE * FB_HEIGHT)
 +
 +#define LTDC_SSCR               0x008
 +#define LTDC_BPCR               0x00c

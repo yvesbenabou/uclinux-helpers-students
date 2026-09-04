@@ -26,7 +26,8 @@ framebuffer@907d8000 {
 		ranges;
 
 		framebuffer@907d8000 {
-			reg = <0x907d8000 0x00028000>; // reserved must be page aligned ??
+			/* 0x25800 scanout bytes rounded up to one page boundary. */
+			reg = <0x907d8000 0x00026000>;
 			no-map;
 		};
 	};

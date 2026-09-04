@@ -96,10 +96,10 @@ uclinux_step_build_stm32() {
     if step_completed "build-stm32" "$STM32_BUILD_FINGERPRINT"; then
         ok "étape déjà validée, make STM32 ignoré (--force pour la relancer)"
     else
-        # Buildroot does not automatically rerun a package's Kconfig merge when
-        # only top-level rootfs choices change. Force the Linux fixups to be
-        # recomputed so a previous initramfs build cannot remain stale.
-        run_with_log "$LOG_DIR/reconfigure-linux-stm32-$TIMESTAMP.log" make_br "$STM32_OUT" linux-reconfigure
+        # linux-reconfigure preserves both .stamp_patched and existing Kbuild
+        # objects. A changed patch would therefore rebuild stale source/objects.
+        # Re-extract and reapply the canonical patch set whenever this step runs.
+        run_with_log "$LOG_DIR/dirclean-linux-stm32-$TIMESTAMP.log" make_br "$STM32_OUT" linux-dirclean
         run_with_log "$LOG_DIR/build-stm32-$TIMESTAMP.log" make_br "$STM32_OUT" -j"$JOBS"
     fi
 
@@ -232,8 +232,8 @@ uclinux_step_build_stm32() {
     grep -q 'partition@180000' "$DT_DUMP" || die "partition rootfs à $STM32_ROMFS_ADDR absente du DTB."
     grep -q 'reg = <0x180000 0x80000>;' "$DT_DUMP" || die "taille de la partition rootfs incorrecte dans le DTB."
     grep -q 'compatible = "simple-framebuffer";' "$DT_DUMP" || die "nœud simple-framebuffer absent du DTB."
-    grep -q 'reg = <0x907d8000 0x25800>; // framebuffer;' "$DT_DUMP" || die "reg framebuffer incorrect dans le DTB."
-    grep -q 'reg = <0x907d8000 0x28000>; // reserved' "$DT_DUMP" || die "reg framebuffer incorrect dans le DTB."
+    grep -q 'reg = <0x907d8000 0x25800>;' "$DT_DUMP" || die "reg framebuffer incorrect dans le DTB."
+    grep -q 'reg = <0x907d8000 0x26000>;' "$DT_DUMP" || die "reg reserved-memory incorrect dans le DTB."
     grep -q 'compatible = "st,stm32f429-disco-simplefb-init";' "$DT_DUMP" || die "initialiseur compact absent du DTB."
     ok "DTB valide : Flash complète et partition rootfs exacte, sans arrondi physmap ; décompilation dans $DT_DUMP"
     mark_step_completed "build-stm32" "$STM32_BUILD_FINGERPRINT"
