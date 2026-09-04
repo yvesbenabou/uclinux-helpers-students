@@ -34,7 +34,7 @@ new file mode 100644
 index 000000000..e846c267d
 --- /dev/null
 +++ b/drivers/video/fbdev/stm32f429-disco-simplefb.c
-@@ -0,0 +1,359 @@
+@@ -0,0 +1,412 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/* Minimal LTDC/ILI9341 setup for the STM32F429I-DISC1 simple framebuffer. */
 +
@@ -100,6 +100,7 @@ index 000000000..e846c267d
 +	};
 +	int ret;
 +
++	/* ILI9341 D/CX pin: low selects the command-register byte. */
 +	gpiod_set_value_cansleep(dc, 0);
 +	transfer.tx_buf = &command;
 +	transfer.len = 1;
@@ -107,6 +108,7 @@ index 000000000..e846c267d
 +	if (ret || !count)
 +		return ret;
 +
++	/* ILI9341 D/CX pin: high selects parameters for that register. */
 +	gpiod_set_value_cansleep(dc, 1);
 +	transfer.tx_buf = data;
 +	transfer.len = count;
@@ -123,93 +125,121 @@ index 000000000..e846c267d
 +{
 +	int ret;
 +
++	/* 0xCA: undocumented vendor command; copied from the upstream board data. */
 +	ret = ILI_CMD(spi, dc, 0xca, 0xc3, 0x08, 0x50);
 +	if (ret)
 +		return ret;
++	/* Power Control B (POWERB, CFh): configure the internal step-up/power circuitry. */
 +	ret = ILI_CMD(spi, dc, 0xcf, 0x00, 0xc1, 0x30);
 +	if (ret)
 +		return ret;
++	/* Power-on Sequence Control (POWER_SEQ, EDh): program the charge-pump power-on sequence. */
 +	ret = ILI_CMD(spi, dc, 0xed, 0x64, 0x03, 0x12, 0x81);
 +	if (ret)
 +		return ret;
++	/* Driver Timing Control A (DTCA, E8h): set the gate-driver timing control A parameters. */
 +	ret = ILI_CMD(spi, dc, 0xe8, 0x85, 0x00, 0x78);
 +	if (ret)
 +		return ret;
++	/* Power Control A (POWERA, CBh): configure the core voltage and charge pump. */
 +	ret = ILI_CMD(spi, dc, 0xcb, 0x39, 0x2c, 0x00, 0x34, 0x02);
 +	if (ret)
 +		return ret;
++	/* Pump Ratio Control (PRC, F7h): set the internal pump ratio to the normal value. */
 +	ret = ILI_CMD(spi, dc, 0xf7, 0x20);
 +	if (ret)
 +		return ret;
++	/* Driver Timing Control B (DTCB, EAh): set the gate-driver timing control B parameters. */
 +	ret = ILI_CMD(spi, dc, 0xea, 0x00, 0x00);
 +	if (ret)
 +		return ret;
++	/* Frame Rate Control (FRC, B1h): fOSC divisor 0 and RTNA=0x1b select 70 Hz. */
 +	ret = ILI_CMD(spi, dc, 0xb1, 0x00, 0x1b);
 +	if (ret)
 +		return ret;
++	/* Display Function Control (DFC, B6h): interval scan, normally white, G1->G320/S720->S1. */
 +	ret = ILI_CMD(spi, dc, 0xb6, 0x0a, 0xa2);
 +	if (ret)
 +		return ret;
++	/* Power Control 1 (POWER1, C0h): set GVDD to 3.65 V. */
 +	ret = ILI_CMD(spi, dc, 0xc0, 0x10);
 +	if (ret)
 +		return ret;
++	/* Power Control 2 (POWER2, C1h): AVDD=2*VCI, VGH=7*VCI and VGL=-4*VCI. */
 +	ret = ILI_CMD(spi, dc, 0xc1, 0x10);
 +	if (ret)
 +		return ret;
++	/* VCOM Control 1 (VCOM1, C5h): set VCOMH=4.425 V and VCOML=-1.975 V. */
 +	ret = ILI_CMD(spi, dc, 0xc5, 0x45, 0x15);
 +	if (ret)
 +		return ret;
++	/* VCOM Control 2 (VCOM2, C7h): VCOM offset is VMH-48 / VML-48. */
 +	ret = ILI_CMD(spi, dc, 0xc7, 0x90);
 +	if (ret)
 +		return ret;
++	/* Memory Access Control (MADCTL, 36h): reverse rows/columns and select BGR component order. */
 +	ret = ILI_CMD(spi, dc, 0x36, 0xc8);
 +	if (ret)
 +		return ret;
++	/* Enable 3G (3GAMMA_EN, F2h): disable the optional three-gamma function. */
 +	ret = ILI_CMD(spi, dc, 0xf2, 0x00);
 +	if (ret)
 +		return ret;
++	/* RGB Interface Signal Control (B0h): memory path, DE mode, sample DOTCLK falling edge. */
 +	ret = ILI_CMD(spi, dc, 0xb0, 0xc2);
 +	if (ret)
 +		return ret;
++	/* Display Function Control (DFC, B6h): 320 lines, 15-frame scan cycle and PCDIV=4. */
 +	ret = ILI_CMD(spi, dc, 0xb6, 0x0a, 0xa7, 0x27, 0x04);
 +	if (ret)
 +		return ret;
++	/* Column Address Set (CASET, 2Ah): start=0, end=239; only defined high-byte bits count. */
 +	ret = ILI_CMD(spi, dc, 0x2a, 0x00, 0x00, 0x0e, 0xef);
 +	if (ret)
 +		return ret;
++	/* Page Address Set (PASET, 2Bh): page start=0, end=319; reserved high-byte bits are ignored. */
 +	ret = ILI_CMD(spi, dc, 0x2b, 0x00, 0x00, 0x13, 0x3f);
 +	if (ret)
 +		return ret;
++	/* Interface Control (F6h): RGB display/RAM path, 16-bit, wrap excess writes. */
 +	ret = ILI_CMD(spi, dc, 0xf6, 0x01, 0x00, 0x06);
 +	if (ret)
 +		return ret;
++	/* Pixel Format Set (COLMOD, 3Ah): DPI pixel format is 16-bit RGB565. */
 +	ret = ILI_CMD(spi, dc, 0x3a, 0x50);
 +	if (ret)
 +		return ret;
++	/* Memory Write (RAMWR, 2Ch): start/restart the display-RAM write pointer. */
 +	ret = ili9341_command(spi, dc, 0x2c, NULL, 0);
 +	if (ret)
 +		return ret;
 +	msleep(200);
++	/* Gamma Set (GAMSET, 26h): select gamma curve 1 (approximately gamma 2.2). */
 +	ret = ILI_CMD(spi, dc, 0x26, 0x01);
 +	if (ret)
 +		return ret;
++	/* Positive Gamma Correction (PGAMCTRL, E0h): program the 15-point positive gamma curve. */
 +	ret = ILI_CMD(spi, dc, 0xe0, 0x0f, 0x29, 0x24, 0x0c, 0x0e,
 +		      0x09, 0x4e, 0x78, 0x3c, 0x09, 0x13, 0x05,
 +		      0x17, 0x11, 0x00);
 +	if (ret)
 +		return ret;
++	/* Negative Gamma Correction (NGAMCTRL, E1h): program the 15-point negative gamma curve. */
 +	ret = ILI_CMD(spi, dc, 0xe1, 0x00, 0x16, 0x1b, 0x04, 0x11,
 +		      0x07, 0x31, 0x33, 0x42, 0x05, 0x0c, 0x0a,
 +		      0x28, 0x2f, 0x0f);
 +	if (ret)
 +		return ret;
++	/* Sleep Out (SLPOUT, 11h): leave sleep mode and enable panel power blocks. */
 +	ret = ili9341_command(spi, dc, 0x11, NULL, 0);
 +	if (ret)
 +		return ret;
 +	msleep(200);
++	/* Display ON (DISPON, 29h): enable the panel display output. */
 +	ret = ili9341_command(spi, dc, 0x29, NULL, 0);
 +	if (ret)
 +		return ret;
++	/* Memory Write (RAMWR, 2Ch): start/restart the display-RAM write pointer. */
 +	return ili9341_command(spi, dc, 0x2c, NULL, 0);
 +}
 +
@@ -279,26 +309,46 @@ index 000000000..e846c267d
 +	}
 +
 +	/* ILI9341 mode: 6.1 MHz, 240x320, h 10/10/20, v 4/2/2. */
++	/* Global Control (GCR): LTDCEN=0 disables the controller for setup. */
 +	ltdc_write(fb, LTDC_GCR, 0);
++	/* Interrupt Enable (IER): disable all LTDC interrupts; simplefb does not service them. */
 +	ltdc_write(fb, LTDC_IER, 0);
++	/* Synchronization Size (SSCR): HSW=9 and VSH=1 encode 10-pixel HSYNC and 2-line VSYNC. */
 +	ltdc_write(fb, LTDC_SSCR, (9 << 16) | 1);
++	/* Back Porch Configuration (BPCR): accumulated back porch AHBP=29, AVBP=3. */
 +	ltdc_write(fb, LTDC_BPCR, (29 << 16) | 3);
++	/* Active Width Configuration (AWCR): active area ends at accumulated X=269 and Y=323. */
 +	ltdc_write(fb, LTDC_AWCR, (269 << 16) | 323);
++	/* Total Width Configuration (TWCR): total scan=280 clocks x 328 lines, encoded minus one. */
 +	ltdc_write(fb, LTDC_TWCR, (279 << 16) | 327);
++	/* Background Color Configuration (BCCR): background RGB color is black. */
 +	ltdc_write(fb, LTDC_BCCR, 0);
 +
++	/* Layer 1 Horizontal Window Position (L1WHPCR): occupies horizontal positions 30 through 269. */
 +	ltdc_write(fb, LTDC_L1WHPCR, (269 << 16) | 30);
++	/* Layer 1 Vertical Window Position (L1WVPCR): occupies vertical positions 4 through 323. */
 +	ltdc_write(fb, LTDC_L1WVPCR, (323 << 16) | 4);
++	/* Layer 1 Pixel Format (L1PFCR): pixel-format code 2 selects RGB565 (16 bits/pixel). */
 +	ltdc_write(fb, LTDC_L1PFCR, LTDC_PF_RGB565);
++	/* Layer 1 Constant Alpha (L1CACR): CONSTA=255 makes layer 1 fully opaque. */
 +	ltdc_write(fb, LTDC_L1CACR, 0xff);
++	/* Layer 1 Default Color (L1DCCR): default color and alpha are transparent black. */
 +	ltdc_write(fb, LTDC_L1DCCR, 0);
++	/* Layer 1 Blending Factors (L1BFCR): BF1=constant alpha, BF2=1-constant alpha. */
 +	ltdc_write(fb, LTDC_L1BFCR, LTDC_BLEND_CONST_ALPHA);
++	/* Layer 1 Framebuffer Address (L1CFBAR): fetches pixels from the reserved framebuffer. */
 +	ltdc_write(fb, LTDC_L1CFBAR, FB_PHYS);
++	/* Layer 1 Framebuffer Length (L1CFBLR): pitch=480 bytes; line length=480+3 as required by LTDC. */
 +	ltdc_write(fb, LTDC_L1CFBLR, (FB_STRIDE << 16) | (FB_WIDTH * 2 + 3));
++	/* Layer 1 Framebuffer Line Number (L1CFBLNR): framebuffer contains 320 lines. */
 +	ltdc_write(fb, LTDC_L1CFBLNR, FB_HEIGHT);
++	/* Layer 1 Control (L1CR): LEN=1 enables layer 1 scanout. */
 +	ltdc_write(fb, LTDC_L1CR, LTDC_L1CR_ENABLE);
++	/* Shadow Reload Control (SRCR): IMR=1 immediately copies shadow settings into active registers. */
 +	ltdc_write(fb, LTDC_SRCR, LTDC_SRCR_IMMEDIATE);
++	/* Global Control (GCR): LTDCEN=1 starts scanout; polarity and dithering bits remain zero. */
 +	ltdc_write(fb, LTDC_GCR, LTDC_GCR_ENABLE);
++	/* Shadow Reload Control (SRCR): IMR=1 immediately copies shadow settings into active registers. */
 +	ltdc_write(fb, LTDC_SRCR, LTDC_SRCR_IMMEDIATE);
 +
 +	return 0;
@@ -338,8 +388,10 @@ index 000000000..e846c267d
 +		return dev_err_probe(&spi->dev, PTR_ERR(fb->dc_gpio),
 +				     "Failed to get gpio dc\n");
 +
++	/* ILI9341 RESX: logical 1 asserts the active-low hardware reset. */
 +	gpiod_set_value(fb->panel_reset, 1);
 +	msleep(20);
++	/* ILI9341 RESX: logical 0 releases reset so commands are accepted. */
 +	gpiod_set_value(fb->panel_reset, 0);
 +	msleep(20);
 +
@@ -360,6 +412,7 @@ index 000000000..e846c267d
 +{
 +	struct stm32f429_fb *fb = spi_get_drvdata(spi);
 +
++	/* Global Control (GCR): LTDCEN=0 stops framebuffer scanout. */
 +	ltdc_write(fb, LTDC_GCR, 0);
 +	iounmap(fb->ltdc);
 +	reset_control_put(fb->reset);
