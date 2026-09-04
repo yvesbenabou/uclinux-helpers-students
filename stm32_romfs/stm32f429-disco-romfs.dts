@@ -4,9 +4,33 @@
 
 &{/chosen} {
 	bootargs = "root=mtd0 rootfstype=romfs ro";
+	#address-cells = <1>;
+	#size-cells = <1>;
+	ranges;
+framebuffer@907d8000 {
+		compatible = "simple-framebuffer";
+		reg = <0x907d8000 0x00025800>; // framebuffer
+		width = <240>;
+		height = <320>;
+		stride = <480>;
+		format = "r5g6b5";
+		display = <&ltdc>;
+		status = "okay";
+	};
 };
 
 / {
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		framebuffer@907d8000 {
+			reg = <0x907d8000 0x00028000>; // reserved must be page aligned ??
+			no-map;
+		};
+	};
+
 	flash@8000000 {
 		compatible = "mtd-rom";
 		reg = <0x08000000 0x00200000>;
@@ -17,11 +41,16 @@
 			#address-cells = <1>;
 			#size-cells = <1>;
 
-			partition@1a0000 {
+			partition@180000 {
 				label = "rootfs";
-				reg = <0x001a0000 0x00060000>;
+				reg = <0x00180000 0x00080000>;
 				read-only;
 			};
 		};
 	};
+};
+
+/* Bind the compact panel/LTDC initializer instead of the DRM panel driver. */
+&display {
+	compatible = "st,stm32f429-disco-simplefb-init";
 };

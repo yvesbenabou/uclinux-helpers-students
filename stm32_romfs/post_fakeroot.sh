@@ -8,7 +8,7 @@ target_dir=$1
 
 romfs_image="$BINARIES_DIR/rootfs.romfs"
 romfs_tmp="$romfs_image.tmp"
-romfs_max_size=$((0x00060000))
+romfs_max_size=$((0x00080000))
 
 command -v genromfs >/dev/null 2>&1 || {
     echo "genromfs is required to create $romfs_image" >&2

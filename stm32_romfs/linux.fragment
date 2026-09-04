@@ -14,22 +14,16 @@ CONFIG_ROMFS_BACKED_BY_MTD=y
 # CONFIG_ROMFS_BACKED_BY_BLOCK is not set
 # CONFIG_ROMFS_BACKED_BY_BOTH is not set
 
-# On-board 2.4-inch ILI9341 panel: SPI5 initializes the panel, then LTDC
-# continuously scans a 16-bpp DRM framebuffer from external SDRAM.
-# The STM LTDC driver gates its pixel clock through runtime PM after probing;
-# without CONFIG_PM, pm_runtime_get_sync() is a no-op and scanout never starts.
-CONFIG_PM=y
+# The board-specific helper initializes SPI5, the ILI9341 and LTDC, while
+# simplefb only exposes the reserved RGB565 scanout buffer as /dev/fb0.
 CONFIG_SPI=y
 CONFIG_SPI_MASTER=y
 CONFIG_SPI_STM32=y
-CONFIG_BACKLIGHT_CLASS_DEVICE=y
-CONFIG_DRM=y
-CONFIG_DRM_STM=y
-CONFIG_DRM_PANEL_ILITEK_ILI9341=y
-CONFIG_DRM_FBDEV_EMULATION=y
-CONFIG_DRM_FBDEV_OVERALLOC=100
 CONFIG_FB=y
+CONFIG_FB_SIMPLE=y
+CONFIG_FB_STM32F429_DISCO_SIMPLE=y
+# CONFIG_DRM is not set
+# CONFIG_BACKLIGHT_CLASS_DEVICE is not set
 
-# Keep the teaching image's console on USART1.  /dev/fb0 remains available
-# without pulling in the VT, fonts, and framebuffer-console rendering stack.
+# Keep the teaching image's console on USART1.
 # CONFIG_FRAMEBUFFER_CONSOLE is not set

@@ -1,0 +1,396 @@
+diff --git a/drivers/video/fbdev/Kconfig b/drivers/video/fbdev/Kconfig
+index 37089d5a7..6a2a99927 100644
+--- a/drivers/video/fbdev/Kconfig
++++ b/drivers/video/fbdev/Kconfig
+@@ -2191,6 +2191,14 @@ config FB_HYPERV
+ 	help
+ 	  This framebuffer driver supports Microsoft Hyper-V Synthetic Video.
+ 
++config FB_STM32F429_DISCO_SIMPLE
++	tristate "STM32F429I-DISC1 simple framebuffer setup"
++	depends on ARCH_STM32 && SPI && GPIOLIB && PINCTRL
++	select FB_SIMPLE
++	help
++	  Initialize the STM32F429 Discovery LTDC and ILI9341 panel for a
++	  pre-allocated RGB565 simple framebuffer.
++
+ config FB_SIMPLE
+ 	tristate "Simple framebuffer support"
+ 	depends on FB
+diff --git a/drivers/video/fbdev/Makefile b/drivers/video/fbdev/Makefile
+index 7795c4126..e723d312c 100644
+--- a/drivers/video/fbdev/Makefile
++++ b/drivers/video/fbdev/Makefile
+@@ -129,6 +129,7 @@ obj-$(CONFIG_FB_MX3)		  += mx3fb.o
+ obj-$(CONFIG_FB_DA8XX)		  += da8xx-fb.o
+ obj-$(CONFIG_FB_SSD1307)	  += ssd1307fb.o
+ obj-$(CONFIG_FB_SIMPLE)           += simplefb.o
++obj-$(CONFIG_FB_STM32F429_DISCO_SIMPLE) += stm32f429-disco-simplefb.o
+ 
+ # the test framebuffer is last
+ obj-$(CONFIG_FB_VIRTUAL)          += vfb.o
+diff --git a/drivers/video/fbdev/stm32f429-disco-simplefb.c b/drivers/video/fbdev/stm32f429-disco-simplefb.c
+new file mode 100644
+index 000000000..b8ce2a6d1
+--- /dev/null
++++ b/drivers/video/fbdev/stm32f429-disco-simplefb.c
+@@ -0,0 +1,359 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/* Minimal LTDC/ILI9341 setup for the STM32F429I-DISC1 simple framebuffer. */
++
++#include <linux/clk.h>
++#include <linux/delay.h>
++#include <linux/gpio/consumer.h>
++#include <linux/io.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/of_address.h>
++#include <linux/of_platform.h>
++#include <linux/pinctrl/consumer.h>
++#include <linux/reset.h>
++#include <linux/spi/spi.h>
++
++#define FB_PHYS                 0x907d8000
++#define FB_SIZE                 0x00028000
++#define FB_WIDTH                240
++#define FB_HEIGHT               320
++#define FB_STRIDE               (FB_WIDTH *2) //16 bits per px
++
++#define LTDC_SSCR               0x008
++#define LTDC_BPCR               0x00c
++#define LTDC_AWCR               0x010
++#define LTDC_TWCR               0x014
++#define LTDC_GCR                0x018
++#define LTDC_SRCR               0x024
++#define LTDC_BCCR               0x02c
++#define LTDC_IER                0x034
++#define LTDC_L1CR               0x084
++#define LTDC_L1WHPCR            0x088
++#define LTDC_L1WVPCR            0x08c
++#define LTDC_L1PFCR             0x094
++#define LTDC_L1CACR             0x098
++#define LTDC_L1DCCR             0x09c
++#define LTDC_L1BFCR             0x0a0
++#define LTDC_L1CFBAR            0x0ac
++#define LTDC_L1CFBLR            0x0b0
++#define LTDC_L1CFBLNR           0x0b4
++
++#define LTDC_GCR_ENABLE         BIT(0)
++#define LTDC_SRCR_IMMEDIATE     BIT(0)
++#define LTDC_L1CR_ENABLE        BIT(0)
++#define LTDC_PF_RGB565          2
++#define LTDC_BLEND_CONST_ALPHA  0x405
++
++struct stm32f429_fb {
++	void __iomem *ltdc;
++	struct clk *lcd_clk;
++	struct reset_control *reset;
++	struct platform_device *ltdc_pdev;
++	struct pinctrl *pinctrl;
++	struct gpio_desc *dc_gpio;
++	struct gpio_desc *panel_reset;
++};
++
++static int ili9341_command(struct spi_device *spi, struct gpio_desc *dc,
++			   u8 command, const u8 *data, size_t count)
++{
++	struct spi_transfer transfer = {
++		.bits_per_word = 8,
++		.speed_hz = min_t(u32, spi->max_speed_hz, 10000000),
++	};
++	int ret;
++
++	gpiod_set_value_cansleep(dc, 0);
++	transfer.tx_buf = &command;
++	transfer.len = 1;
++	ret = spi_sync_transfer(spi, &transfer, 1);
++	if (ret || !count)
++		return ret;
++
++	gpiod_set_value_cansleep(dc, 1);
++	transfer.tx_buf = data;
++	transfer.len = count;
++	return spi_sync_transfer(spi, &transfer, 1);
++}
++
++#define ILI_CMD(_spi, _dc, _cmd, ...)                                        \
++({                                                                      \
++	const u8 data[] = { __VA_ARGS__ };                              \
++	ili9341_command((_spi), (_dc), (_cmd), data, ARRAY_SIZE(data));         \
++})
++
++static int ili9341_init(struct spi_device *spi, struct gpio_desc *dc)
++{
++	int ret;
++
++	ret = ILI_CMD(spi, dc, 0xca, 0xc3, 0x08, 0x50);
++	if (ret)
++		return ret;
++	ret = ILI_CMD(spi, dc, 0xcf, 0x00, 0xc1, 0x30);
++	if (ret)
++		return ret;
++	ret = ILI_CMD(spi, dc, 0xed, 0x64, 0x03, 0x12, 0x81);
++	if (ret)
++		return ret;
++	ret = ILI_CMD(spi, dc, 0xe8, 0x85, 0x00, 0x78);
++	if (ret)
++		return ret;
++	ret = ILI_CMD(spi, dc, 0xcb, 0x39, 0x2c, 0x00, 0x34, 0x02);
++	if (ret)
++		return ret;
++	ret = ILI_CMD(spi, dc, 0xf7, 0x20);
++	if (ret)
++		return ret;
++	ret = ILI_CMD(spi, dc, 0xea, 0x00, 0x00);
++	if (ret)
++		return ret;
++	ret = ILI_CMD(spi, dc, 0xb1, 0x00, 0x1b);
++	if (ret)
++		return ret;
++	ret = ILI_CMD(spi, dc, 0xb6, 0x0a, 0xa2);
++	if (ret)
++		return ret;
++	ret = ILI_CMD(spi, dc, 0xc0, 0x10);
++	if (ret)
++		return ret;
++	ret = ILI_CMD(spi, dc, 0xc1, 0x10);
++	if (ret)
++		return ret;
++	ret = ILI_CMD(spi, dc, 0xc5, 0x45, 0x15);
++	if (ret)
++		return ret;
++	ret = ILI_CMD(spi, dc, 0xc7, 0x90);
++	if (ret)
++		return ret;
++	ret = ILI_CMD(spi, dc, 0x36, 0xc8);
++	if (ret)
++		return ret;
++	ret = ILI_CMD(spi, dc, 0xf2, 0x00);
++	if (ret)
++		return ret;
++	ret = ILI_CMD(spi, dc, 0xb0, 0xc2);
++	if (ret)
++		return ret;
++	ret = ILI_CMD(spi, dc, 0xb6, 0x0a, 0xa7, 0x27, 0x04);
++	if (ret)
++		return ret;
++	ret = ILI_CMD(spi, dc, 0x2a, 0x00, 0x00, 0x0e, 0xef);
++	if (ret)
++		return ret;
++	ret = ILI_CMD(spi, dc, 0x2b, 0x00, 0x00, 0x13, 0x3f);
++	if (ret)
++		return ret;
++	ret = ILI_CMD(spi, dc, 0xf6, 0x01, 0x00, 0x06);
++	if (ret)
++		return ret;
++	ret = ILI_CMD(spi, dc, 0x3a, 0x50);
++	if (ret)
++		return ret;
++	ret = ili9341_command(spi, dc, 0x2c, NULL, 0);
++	if (ret)
++		return ret;
++	msleep(200);
++	ret = ILI_CMD(spi, dc, 0x26, 0x01);
++	if (ret)
++		return ret;
++	ret = ILI_CMD(spi, dc, 0xe0, 0x0f, 0x29, 0x24, 0x0c, 0x0e,
++		      0x09, 0x4e, 0x78, 0x3c, 0x09, 0x13, 0x05,
++		      0x17, 0x11, 0x00);
++	if (ret)
++		return ret;
++	ret = ILI_CMD(spi, dc, 0xe1, 0x00, 0x16, 0x1b, 0x04, 0x11,
++		      0x07, 0x31, 0x33, 0x42, 0x05, 0x0c, 0x0a,
++		      0x28, 0x2f, 0x0f);
++	if (ret)
++		return ret;
++	ret = ili9341_command(spi, dc, 0x11, NULL, 0);
++	if (ret)
++		return ret;
++	msleep(200);
++	ret = ili9341_command(spi, dc, 0x29, NULL, 0);
++	if (ret)
++		return ret;
++	return ili9341_command(spi, dc, 0x2c, NULL, 0);
++}
++
++static void ltdc_write(struct stm32f429_fb *fb, u32 offset, u32 value)
++{
++	writel_relaxed(value, fb->ltdc + offset);
++}
++
++static int stm32f429_ltdc_init(struct spi_device *spi,
++			       struct stm32f429_fb *fb)
++{
++	struct device_node *node;
++	void __iomem *screen;
++	int ret;
++
++	node = of_find_compatible_node(NULL, NULL, "st,stm32-ltdc");
++	if (!node)
++		return -ENODEV;
++
++	fb->ltdc_pdev = of_find_device_by_node(node);
++	if (!fb->ltdc_pdev) {
++		of_node_put(node);
++		return -EPROBE_DEFER;
++	}
++
++	fb->pinctrl = pinctrl_get_select_default(&fb->ltdc_pdev->dev);
++	if (IS_ERR(fb->pinctrl)) {
++		ret = PTR_ERR(fb->pinctrl);
++		goto err_put_device;
++	}
++
++	fb->lcd_clk = clk_get(&fb->ltdc_pdev->dev, "lcd");
++	if (IS_ERR(fb->lcd_clk)) {
++		ret = PTR_ERR(fb->lcd_clk);
++		goto err_put_pinctrl;
++	}
++	ret = clk_set_rate(fb->lcd_clk, 6100000);
++	if (ret)
++		goto err_put_clk;
++	ret = clk_prepare_enable(fb->lcd_clk);
++	if (ret)
++		goto err_put_clk;
++
++	fb->reset = reset_control_get_optional_exclusive(&fb->ltdc_pdev->dev,
++							  NULL);
++	if (IS_ERR(fb->reset)) {
++		ret = PTR_ERR(fb->reset);
++		goto err_disable_clk;
++	}
++	if (fb->reset) {
++		reset_control_assert(fb->reset);
++		usleep_range(10, 20);
++		reset_control_deassert(fb->reset);
++	}
++
++	fb->ltdc = of_iomap(node, 0);
++	of_node_put(node);
++	if (!fb->ltdc) {
++		ret = -ENOMEM;
++		goto err_put_reset;
++	}
++
++	screen = ioremap_wc(FB_PHYS, FB_SIZE);
++	if (screen) {
++		memset_io(screen, 0, FB_SIZE);
++		iounmap(screen);
++	}
++
++	/* ILI9341 mode: 6.1 MHz, 240x320, h 10/10/20, v 4/2/2. */
++	ltdc_write(fb, LTDC_GCR, 0);
++	ltdc_write(fb, LTDC_IER, 0);
++	ltdc_write(fb, LTDC_SSCR, (9 << 16) | 1);
++	ltdc_write(fb, LTDC_BPCR, (29 << 16) | 3);
++	ltdc_write(fb, LTDC_AWCR, (269 << 16) | 323);
++	ltdc_write(fb, LTDC_TWCR, (279 << 16) | 327);
++	ltdc_write(fb, LTDC_BCCR, 0);
++
++	ltdc_write(fb, LTDC_L1WHPCR, (269 << 16) | 30);
++	ltdc_write(fb, LTDC_L1WVPCR, (323 << 16) | 4);
++	ltdc_write(fb, LTDC_L1PFCR, LTDC_PF_RGB565);
++	ltdc_write(fb, LTDC_L1CACR, 0xff);
++	ltdc_write(fb, LTDC_L1DCCR, 0);
++	ltdc_write(fb, LTDC_L1BFCR, LTDC_BLEND_CONST_ALPHA);
++	ltdc_write(fb, LTDC_L1CFBAR, FB_PHYS);
++	ltdc_write(fb, LTDC_L1CFBLR, (FB_STRIDE << 16) | (FB_WIDTH * 2 + 3));
++	ltdc_write(fb, LTDC_L1CFBLNR, FB_HEIGHT);
++	ltdc_write(fb, LTDC_L1CR, LTDC_L1CR_ENABLE);
++	ltdc_write(fb, LTDC_SRCR, LTDC_SRCR_IMMEDIATE);
++	ltdc_write(fb, LTDC_GCR, LTDC_GCR_ENABLE);
++	ltdc_write(fb, LTDC_SRCR, LTDC_SRCR_IMMEDIATE);
++
++	return 0;
++
++err_put_reset:
++	reset_control_put(fb->reset);
++err_disable_clk:
++	clk_disable_unprepare(fb->lcd_clk);
++err_put_clk:
++	clk_put(fb->lcd_clk);
++err_put_pinctrl:
++	pinctrl_put(fb->pinctrl);
++err_put_device:
++	of_node_put(node);
++	put_device(&fb->ltdc_pdev->dev);
++	return ret;
++}
++
++static int stm32f429_fb_probe(struct spi_device *spi)
++{
++	struct stm32f429_fb *fb;
++	int ret;
++
++	fb = devm_kzalloc(&spi->dev, sizeof(*fb), GFP_KERNEL);
++	if (!fb)
++		return -ENOMEM;
++
++	fb->panel_reset = devm_gpiod_get_optional(&spi->dev, "reset",
++						       GPIOD_OUT_HIGH);
++	if (IS_ERR(fb->panel_reset))
++		return dev_err_probe(&spi->dev, PTR_ERR(fb->panel_reset),
++				     "Failed to get gpio reset\n");
++
++	fb->dc_gpio = devm_gpiod_get_optional(&spi->dev, "dc",
++						  GPIOD_OUT_LOW);
++	if (IS_ERR(fb->dc_gpio))
++		return dev_err_probe(&spi->dev, PTR_ERR(fb->dc_gpio),
++				     "Failed to get gpio dc\n");
++
++	gpiod_set_value(fb->panel_reset, 1);
++	msleep(20);
++	gpiod_set_value(fb->panel_reset, 0);
++	msleep(20);
++
++	ret = ili9341_init(spi, fb->dc_gpio);
++	if (ret)
++		return dev_err_probe(&spi->dev, ret, "ILI9341 setup failed\n");
++
++	ret = stm32f429_ltdc_init(spi, fb);
++	if (ret)
++		return dev_err_probe(&spi->dev, ret, "LTDC setup failed\n");
++
++	spi_set_drvdata(spi, fb);
++	dev_info(&spi->dev, "ILI9341/LTDC initialized for simplefb\n");
++	return 0;
++}
++
++static void stm32f429_fb_remove(struct spi_device *spi)
++{
++	struct stm32f429_fb *fb = spi_get_drvdata(spi);
++
++	ltdc_write(fb, LTDC_GCR, 0);
++	iounmap(fb->ltdc);
++	reset_control_put(fb->reset);
++	clk_disable_unprepare(fb->lcd_clk);
++	clk_put(fb->lcd_clk);
++	pinctrl_put(fb->pinctrl);
++	put_device(&fb->ltdc_pdev->dev);
++}
++
++static const struct of_device_id stm32f429_fb_of_match[] = {
++	{ .compatible = "st,stm32f429-disco-simplefb-init" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, stm32f429_fb_of_match);
++
++static const struct spi_device_id stm32f429_fb_ids[] = {
++	{ "stm32f429-disco-simplefb-init" },
++	{ }
++};
++MODULE_DEVICE_TABLE(spi, stm32f429_fb_ids);
++
++static struct spi_driver stm32f429_fb_driver = {
++	.driver = {
++		.name = "stm32f429-disco-simplefb",
++		.of_match_table = stm32f429_fb_of_match,
++	},
++	.id_table = stm32f429_fb_ids,
++	.probe = stm32f429_fb_probe,
++	.remove = stm32f429_fb_remove,
++};
++module_spi_driver(stm32f429_fb_driver);
++
++MODULE_DESCRIPTION("STM32F429I-DISC1 simplefb display initializer");
++MODULE_LICENSE("GPL");

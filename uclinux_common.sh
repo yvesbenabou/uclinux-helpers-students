@@ -48,8 +48,8 @@ run_logged() {
 : "${EXPECTED_LINUX_VERSION:=6.1.133}"
 : "${LINUX_STABLE_GIT_URL:=https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git}"
 : "${WORK_ROOT:=$(uclinux_default_root)}"
-: "${STM32_ROMFS_ADDR:=0x081A0000}"
-: "${STM32_ROMFS_PARTITION_SIZE:=0x00060000}"
+: "${STM32_ROMFS_ADDR:=0x08180000}"
+: "${STM32_ROMFS_PARTITION_SIZE:=0x00080000}"
 : "${STM32_FLASH_END:=0x08200000}"
 : "${STM32_STUDENT_HEADROOM:=102400}"
 : "${QUIET:=0}"
@@ -451,6 +451,7 @@ uclinux_stm32_romfs_configured() {
     local post_fakeroot
     local fragments
     local busybox_fragments
+    local global_patch_dirs
 
     [[ -s "$config" ]] || return 1
     grep -Fqx '# BR2_TARGET_ROOTFS_INITRAMFS is not set' "$config" || return 1
@@ -463,10 +464,12 @@ uclinux_stm32_romfs_configured() {
 
     fragments="$(br_config_value "$config" BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES)"
     busybox_fragments="$(br_config_value "$config" BR2_PACKAGE_BUSYBOX_CONFIG_FRAGMENT_FILES)"
+    global_patch_dirs="$(br_config_value "$config" BR2_GLOBAL_PATCH_DIR)"
     post_build="$(br_config_value "$config" BR2_ROOTFS_POST_BUILD_SCRIPT)"
     post_fakeroot="$(br_config_value "$config" BR2_ROOTFS_POST_FAKEROOT_SCRIPT)"
     [[ " $fragments " == *" $asset_dir/linux.fragment "* ]] || return 1
     [[ " $busybox_fragments " == *" $asset_dir/busybox.fragment "* ]] || return 1
+    [[ " $global_patch_dirs " == *" $asset_dir/patches "* ]] || return 1
     [[ " $post_build " == *" $asset_dir/post_build.sh "* ]] || return 1
     [[ " $post_fakeroot " == *" $asset_dir/post_fakeroot.sh "* ]] || return 1
 }
@@ -477,6 +480,7 @@ uclinux_generate_stm32_config() {
     local asset_dir="$SCRIPT_DIR/stm32_romfs"
     local fragments
     local busybox_fragments
+    local global_patch_dirs
     local post_build
     local post_fakeroot
 
@@ -485,12 +489,15 @@ uclinux_generate_stm32_config() {
     check_file_nonempty "$config_tool"
     check_file_nonempty "$asset_dir/linux.fragment"
     check_file_nonempty "$asset_dir/busybox.fragment"
+    check_file_nonempty "$asset_dir/patches/linux/0001-if-stm32-nommu-define-have-arch-fb-unmapped-area.patch" \
+    check_file_nonempty "$asset_dir/patches/linux/0002-fbdev-add-stm32f429-disco-simplefb-init.patch"
     check_file_nonempty "$asset_dir/stm32f429-disco-romfs.dts"
     check_file_nonempty "$asset_dir/post_build.sh"
     check_file_nonempty "$asset_dir/post_fakeroot.sh"
 
     fragments="$(uclinux_config_append_word "$config" BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES "$asset_dir/linux.fragment")"
     busybox_fragments="$(uclinux_config_append_word "$config" BR2_PACKAGE_BUSYBOX_CONFIG_FRAGMENT_FILES "$asset_dir/busybox.fragment")"
+    global_patch_dirs="$(uclinux_config_append_word "$config" BR2_GLOBAL_PATCH_DIR "$asset_dir/patches")"
     post_build="$(uclinux_config_append_word "$config" BR2_ROOTFS_POST_BUILD_SCRIPT "$asset_dir/post_build.sh")"
     post_fakeroot="$(uclinux_config_append_word "$config" BR2_ROOTFS_POST_FAKEROOT_SCRIPT "$asset_dir/post_fakeroot.sh")"
 
@@ -503,6 +510,7 @@ uclinux_generate_stm32_config() {
         --enable BR2_TARGET_ROOTFS_TAR_NONE \
         --set-str BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES "$fragments" \
         --set-str BR2_PACKAGE_BUSYBOX_CONFIG_FRAGMENT_FILES "$busybox_fragments" \
+        --set-str BR2_GLOBAL_PATCH_DIR "$global_patch_dirs" \
         --set-str BR2_LINUX_KERNEL_CUSTOM_DTS_PATH "$asset_dir/stm32f429-disco-romfs.dts" \
         --set-str BR2_LINUX_KERNEL_INTREE_DTS_NAME "" \
         --set-str BR2_ROOTFS_POST_BUILD_SCRIPT "$post_build" \

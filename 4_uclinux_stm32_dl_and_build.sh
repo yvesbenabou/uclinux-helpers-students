@@ -78,13 +78,17 @@ uclinux_step_build_stm32() {
     uclinux_ensure_stm32_config
     uclinux_enable_host_environment_setup "$STM32_OUT"
     uclinux_repair_relocated_host_fakeroot "$STM32_OUT"
-    prepare_linux_override "$STM32_OUT"
+    if [[ -f "$STM32_OUT/local.mk" ]]; then
+        sed -i '/^LINUX_OVERRIDE_SRCDIR[[:space:]]*=/d' "$STM32_OUT/local.mk"
+    fi
 
     section "Construction complète STM32F429I-DISC1"
     STM32_BUILD_FINGERPRINT="$(step_fingerprint "$STM32_OUT" \
         "$SCRIPT_DIR/4_uclinux_stm32_dl_and_build.sh" \
         "$SCRIPT_DIR/uclinux_common.sh" \
         "$asset_dir/linux.fragment" \
+        "$asset_dir/patches/linux/0001-if-stm32-nommu-define-have-arch-fb-unmapped-area.patch" \
+        "$asset_dir/patches/linux/0002-fbdev-add-stm32f429-disco-simplefb-init.patch" \
         "$asset_dir/busybox.fragment" \
         "$asset_dir/stm32f429-disco-romfs.dts" \
         "$asset_dir/post_build.sh" \
@@ -153,12 +157,11 @@ uclinux_step_build_stm32() {
     grep -qx 'CONFIG_MTD_OF_PARTS=y' "$KERNEL_CONFIG" || die "le parseur de partitions MTD du DT n'est pas actif."
     grep -qx 'CONFIG_ROMFS_FS=y' "$KERNEL_CONFIG" || die "CONFIG_ROMFS_FS n'est pas actif."
     grep -qx 'CONFIG_ROMFS_BACKED_BY_MTD=y' "$KERNEL_CONFIG" || die "ROMFS n'utilise pas directement MTD."
-    grep -qx 'CONFIG_PM=y' "$KERNEL_CONFIG" || die "le runtime PM requis par le pilote LTDC n'est pas actif."
     grep -qx 'CONFIG_SPI_STM32=y' "$KERNEL_CONFIG" || die "le contrôleur SPI STM32 n'est pas actif."
-    grep -qx 'CONFIG_DRM_STM=y' "$KERNEL_CONFIG" || die "le pilote DRM LTDC STM32 n'est pas actif."
-    grep -qx 'CONFIG_DRM_PANEL_ILITEK_ILI9341=y' "$KERNEL_CONFIG" || die "le pilote de dalle ILI9341 n'est pas actif."
-    grep -qx 'CONFIG_DRM_FBDEV_EMULATION=y' "$KERNEL_CONFIG" || die "l'émulation fbdev DRM n'est pas active."
-    ok "noyau Linux $EXPECTED_LINUX_VERSION : ARM, no-MMU, XIP, ROMFS sur MTD, LTDC/ILI9341 avec /dev/fb0"
+    grep -qx 'CONFIG_FB_SIMPLE=y' "$KERNEL_CONFIG" || die "CONFIG_FB_SIMPLE n'est pas actif."
+    grep -qx 'CONFIG_FB_STM32F429_DISCO_SIMPLE=y' "$KERNEL_CONFIG" || die "l'initialiseur LTDC/ILI9341 compact n'est pas actif."
+    grep -qx '# CONFIG_DRM is not set' "$KERNEL_CONFIG" || die "DRM est encore actif."
+    ok "noyau Linux $EXPECTED_LINUX_VERSION : ARM, no-MMU, XIP, ROMFS sur MTD, LTDC/ILI9341 simplefb avec /dev/fb0"
 
     ROMFS_MAGIC="$(dd if="$ROMFS_IMAGE" bs=8 count=1 2>/dev/null)"
     [[ "$ROMFS_MAGIC" == '-rom1fs-' ]] || die "signature ROMFS invalide : $ROMFS_IMAGE"
@@ -226,8 +229,12 @@ uclinux_step_build_stm32() {
     grep -q 'flash@8000000' "$DT_DUMP" || die "mapping de la Flash interne complète absent du DTB."
     grep -q 'reg = <0x8000000 0x200000>;' "$DT_DUMP" || die "taille du mapping Flash incorrecte dans le DTB."
     grep -q 'compatible = "fixed-partitions";' "$DT_DUMP" || die "partitions MTD fixes absentes du DTB."
-    grep -q 'partition@1a0000' "$DT_DUMP" || die "partition rootfs à $STM32_ROMFS_ADDR absente du DTB."
-    grep -q 'reg = <0x1a0000 0x60000>;' "$DT_DUMP" || die "taille de la partition rootfs incorrecte dans le DTB."
+    grep -q 'partition@180000' "$DT_DUMP" || die "partition rootfs à $STM32_ROMFS_ADDR absente du DTB."
+    grep -q 'reg = <0x180000 0x80000>;' "$DT_DUMP" || die "taille de la partition rootfs incorrecte dans le DTB."
+    grep -q 'compatible = "simple-framebuffer";' "$DT_DUMP" || die "nœud simple-framebuffer absent du DTB."
+    grep -q 'reg = <0x907d8000 0x25800>; // framebuffer;' "$DT_DUMP" || die "reg framebuffer incorrect dans le DTB."
+    grep -q 'reg = <0x907d8000 0x28000>; // reserved' "$DT_DUMP" || die "reg framebuffer incorrect dans le DTB."
+    grep -q 'compatible = "st,stm32f429-disco-simplefb-init";' "$DT_DUMP" || die "initialiseur compact absent du DTB."
     ok "DTB valide : Flash complète et partition rootfs exacte, sans arrondi physmap ; décompilation dans $DT_DUMP"
     mark_step_completed "build-stm32" "$STM32_BUILD_FINGERPRINT"
 
