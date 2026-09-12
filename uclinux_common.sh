@@ -219,10 +219,15 @@ make_br() {
     local __fn="${FUNCNAME[0]}"
     local out=$1
     local rc
+    local -a external_args=()
 
     debug_enter "$__fn"
     shift
-    make -C "$BUILDROOT_DIR" O="$out" BR2_DL_DIR="$DOWNLOAD_DIR" "$@"
+    if [[ "${UCLINUX_BR2_EXTERNAL_SET:-0}" == 1 ]]; then
+        external_args+=("BR2_EXTERNAL=${BR2_EXTERNAL-}")
+    fi
+    make -C "$BUILDROOT_DIR" O="$out" BR2_DL_DIR="$DOWNLOAD_DIR" \
+        "${external_args[@]}" "$@"
     rc=$?
     debug_exit "$__fn" "$rc"
     return "$rc"

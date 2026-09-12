@@ -9,6 +9,15 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=uclinux_common.sh
 source "$SCRIPT_DIR/uclinux_common.sh"
 
+# BR2_EXTERNAL is persisted by Buildroot in the output directory. Override it
+# only when the caller supplies the environment variable or command-line option;
+# otherwise let Buildroot reuse its remembered external tree.
+UCLINUX_BR2_EXTERNAL_SET=0
+if [[ ${BR2_EXTERNAL+x} ]]; then
+    UCLINUX_BR2_EXTERNAL_SET=1
+fi
+REBUILD_PACKAGES=()
+
 linux_build_dir() {
     local __fn="${FUNCNAME[0]}"
     local out=$1
@@ -26,6 +35,38 @@ linux_build_dir() {
 
     debug_exit "$__fn" 1
     die "répertoire de build Linux introuvable (cherché : $out/build/linux-custom, $out/build/linux-$version)"
+}
+
+stm32_linux_inputs_fingerprint() {
+    local asset_dir=$1
+
+    {
+        printf 'buildroot=%s\nlinux=%s\n' "$BUILDROOT_REF" "$EXPECTED_LINUX_VERSION"
+        sha256sum \
+            "$asset_dir/linux.fragment" \
+            "$asset_dir/patches/linux/0001-if-stm32-nommu-define-have-arch-fb-unmapped-area.patch" \
+            "$asset_dir/patches/linux/0002-fbdev-add-stm32f429-disco-simplefb-init.patch" \
+            "$asset_dir/stm32f429-disco-romfs.dts"
+    } | sha256sum | awk '{print $1}'
+}
+
+stm32_build_fingerprint() {
+    local asset_dir=$1
+
+    {
+        step_fingerprint "$STM32_OUT" \
+            "$SCRIPT_DIR/4_uclinux_stm32_dl_and_build.sh" \
+            "$SCRIPT_DIR/uclinux_common.sh" \
+            "$asset_dir/linux.fragment" \
+            "$asset_dir/patches/linux/0001-if-stm32-nommu-define-have-arch-fb-unmapped-area.patch" \
+            "$asset_dir/patches/linux/0002-fbdev-add-stm32f429-disco-simplefb-init.patch" \
+            "$asset_dir/busybox.fragment" \
+            "$asset_dir/stm32f429-disco-romfs.dts" \
+            "$asset_dir/post_build.sh" \
+            "$asset_dir/post_fakeroot.sh"
+        printf 'BR2_EXTERNAL_SET=%s\nBR2_EXTERNAL=%s\n' \
+            "$UCLINUX_BR2_EXTERNAL_SET" "${BR2_EXTERNAL-}"
+    } | sha256sum | awk '{print $1}'
 }
 
 uclinux_ensure_stm32_config() {
@@ -72,6 +113,10 @@ uclinux_repair_relocated_host_fakeroot() {
 
 uclinux_step_build_stm32() {
     local asset_dir="$SCRIPT_DIR/stm32_romfs"
+    local build_required=0
+    local linux_clean_required=0
+    local linux_inputs_marker
+    local package
 
     section "Préparation des sources Linux STM32"
     uclinux_require_buildroot
@@ -82,24 +127,43 @@ uclinux_step_build_stm32() {
         sed -i '/^LINUX_OVERRIDE_SRCDIR[[:space:]]*=/d' "$STM32_OUT/local.mk"
     fi
 
-    section "Construction complète STM32F429I-DISC1"
-    STM32_BUILD_FINGERPRINT="$(step_fingerprint "$STM32_OUT" \
-        "$SCRIPT_DIR/4_uclinux_stm32_dl_and_build.sh" \
-        "$SCRIPT_DIR/uclinux_common.sh" \
-        "$asset_dir/linux.fragment" \
-        "$asset_dir/patches/linux/0001-if-stm32-nommu-define-have-arch-fb-unmapped-area.patch" \
-        "$asset_dir/patches/linux/0002-fbdev-add-stm32f429-disco-simplefb-init.patch" \
-        "$asset_dir/busybox.fragment" \
-        "$asset_dir/stm32f429-disco-romfs.dts" \
-        "$asset_dir/post_build.sh" \
-        "$asset_dir/post_fakeroot.sh")"
-    if step_completed "build-stm32" "$STM32_BUILD_FINGERPRINT"; then
+    section "Construction STM32F429I-DISC1"
+    if [[ "$UCLINUX_BR2_EXTERNAL_SET" == 1 && -z "${BR2_EXTERNAL-}" ]]; then
+        warn "BR2_EXTERNAL détaché explicitement ; les fichiers de paquets déjà installés peuvent rester dans target/ jusqu'à un build propre"
+    fi
+    STM32_BUILD_FINGERPRINT="$(stm32_build_fingerprint "$asset_dir")"
+    STM32_LINUX_INPUTS_FINGERPRINT="$(stm32_linux_inputs_fingerprint "$asset_dir")"
+    linux_inputs_marker="$(step_marker linux-stm32-inputs)"
+
+    if ! step_completed "build-stm32" "$STM32_BUILD_FINGERPRINT"; then
+        build_required=1
+    fi
+    if ((${#REBUILD_PACKAGES[@]})); then
+        build_required=1
+    fi
+
+    if ((build_required == 0)); then
         ok "étape déjà validée, make STM32 ignoré (--force pour la relancer)"
     else
         # linux-reconfigure preserves both .stamp_patched and existing Kbuild
         # objects. A changed patch would therefore rebuild stale source/objects.
-        # Re-extract and reapply the canonical patch set whenever this step runs.
-        run_with_log "$LOG_DIR/dirclean-linux-stm32-$TIMESTAMP.log" make_br "$STM32_OUT" linux-dirclean
+        # Only re-extract Linux when its own inputs changed, not for an external
+        # package rebuild or another unrelated Buildroot configuration change.
+        if ((RESUME == 0)) || force_step_requested "build-stm32"; then
+            linux_clean_required=1
+        elif [[ -f "$linux_inputs_marker" ]] \
+            && ! grep -qx "fingerprint=$STM32_LINUX_INPUTS_FINGERPRINT" "$linux_inputs_marker"; then
+            linux_clean_required=1
+        fi
+        if ((linux_clean_required)); then
+            run_with_log "$LOG_DIR/dirclean-linux-stm32-$TIMESTAMP.log" \
+                make_br "$STM32_OUT" linux-dirclean
+        fi
+
+        for package in "${REBUILD_PACKAGES[@]}"; do
+            run_with_log "$LOG_DIR/rebuild-$package-stm32-$TIMESTAMP.log" \
+                make_br "$STM32_OUT" -j"$JOBS" "${package}-rebuild"
+        done
         run_with_log "$LOG_DIR/build-stm32-$TIMESTAMP.log" make_br "$STM32_OUT" -j"$JOBS"
     fi
 
@@ -236,7 +300,11 @@ uclinux_step_build_stm32() {
     grep -q 'reg = <0x907d8000 0x26000>;' "$DT_DUMP" || die "reg reserved-memory incorrect dans le DTB."
     grep -q 'compatible = "st,stm32f429-disco-simplefb-init";' "$DT_DUMP" || die "initialiseur compact absent du DTB."
     ok "DTB valide : Flash complète et partition rootfs exacte, sans arrondi physmap ; décompilation dans $DT_DUMP"
+    # syncconfig may update .config during the build (for example when a new
+    # external tree adds Kconfig symbols), so fingerprint the final state.
+    STM32_BUILD_FINGERPRINT="$(stm32_build_fingerprint "$asset_dir")"
     mark_step_completed "build-stm32" "$STM32_BUILD_FINGERPRINT"
+    mark_step_completed "linux-stm32-inputs" "$STM32_LINUX_INPUTS_FINGERPRINT"
 
     printf '\nImages STM32 générées :\n'
     find "$STM32_OUT/images" -maxdepth 1 -type f -printf '  %-38f %10s octets\n' | sort
@@ -255,13 +323,20 @@ Utilisation :
   ./4_uclinux_stm32_dl_and_build.sh [options]
 
 Options :
-  --root CHEMIN   Racine de travail, défaut : $UCLINUX_ROOT ou $HOME/uclinux
-  --jobs N        Nombre de compilations parallèles
-  --force         Réexécuter le build STM32 même s'il est marqué réussi
-  --no-resume     Ignorer les étapes déjà marquées comme réussies
-  --quiet         Masquer la sortie verbeuse des commandes longues
-  --debug         Tracer l'entrée et la sortie des fonctions
-  -h, --help      Afficher cette aide
+  --root CHEMIN           Racine de travail, défaut : $UCLINUX_ROOT ou $HOME/uclinux
+  --jobs N                Nombre de compilations parallèles
+  --br2-external CHEMIN   Arbre(s) BR2_EXTERNAL, prioritaire sur l'environnement
+  --redo-package NOM   Reconstruire/réinstaller un paquet, option répétable
+  --force                 Relancer tout le build, y compris linux-dirclean
+  --no-resume             Ignorer les étapes déjà marquées comme réussies
+  --quiet                 Masquer la sortie verbeuse des commandes longues
+  --debug                 Tracer l'entrée et la sortie des fonctions
+  -h, --help              Afficher cette aide
+
+La variable d'environnement BR2_EXTERNAL est aussi acceptée. Sans option ni
+variable, Buildroot réutilise la valeur mémorisée dans le répertoire de sortie.
+Une liste de chemins peut être séparée par des deux-points. Une valeur vide
+explicite détache les arbres externes, mais ne désinstalle pas leurs fichiers.
 USAGE
 }
 
@@ -278,6 +353,20 @@ while (($#)); do
                 exit 2
             }
             JOBS=$2
+            shift 2
+            ;;
+        --br2-external)
+            [[ $# -ge 2 ]] || { echo "ERREUR : --br2-external attend un chemin (ou une chaîne vide)." >&2; exit 2; }
+            BR2_EXTERNAL=$2
+            UCLINUX_BR2_EXTERNAL_SET=1
+            shift 2
+            ;;
+        --redo-package)
+            [[ $# -ge 2 && "$2" =~ ^[a-z0-9][a-z0-9+_.-]*$ ]] || {
+                echo "ERREUR : --redo-package attend un nom de paquet Buildroot." >&2
+                exit 2
+            }
+            REBUILD_PACKAGES+=("$2")
             shift 2
             ;;
         --force)
