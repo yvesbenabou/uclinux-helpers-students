@@ -19,7 +19,6 @@ PROJECT_DIR="${UCLINUX_DRIVERS_PROJECT:-$SCRIPT_DIR/../linux-drivers-labs}"
 MODE=""
 TARGET_OVERRIDE=""
 DRY_RUN=0
-VERIFY_FLASH=0
 
 TARGET=""
 OUT=""
@@ -35,6 +34,7 @@ ACTIVE_BUSYBOX_FRAGMENT=""
 ACTIVE_DTS=""
 ACTIVE_POST_BUILD=""
 APPLIED_CONFIG_STATE=""
+ACTIVE_SELECTION_STATE=""
 
 usage() {
     cat <<'USAGE'
@@ -47,15 +47,12 @@ Utilisation :
   ./driver.sh paths PROFIL [options]
   ./driver.sh show-config PROFIL [options]
   ./driver.sh show-dtb PROFIL [options]
-  ./driver.sh flash PROFIL [options]
-  ./driver.sh console [--device CHEMIN]
 
 Profils :
   kmod-hello   Driver minimal pour QEMU ou STM32
   evtbuf       Character driver événementiel pour QEMU ou STM32
   stm32gpio    Platform driver GPIO synchrone sur STM32
   stm32evt     Platform driver GPIO/IRQ sur STM32
-  fb0          Image STM32 de référence, sans source étudiante
 
 Options :
   --project CHEMIN   Dépôt linux-drivers-labs
@@ -64,7 +61,6 @@ Options :
   --mode MODE        module ou builtin ; obligatoire pour prepare et build
   --jobs N           Compilations parallèles
   --dry-run          Montrer le plan exact sans modifier ni construire
-  --verify           Vérifier les images après flash
   --quiet            Réduire la sortie des commandes longues
   --debug            Tracer les fonctions des helpers
   -h, --help         Afficher cette aide
@@ -118,12 +114,6 @@ resolve_profile() {
             PROJECT_DTS=dts/stm32evt.dtsi
             DEFAULT_MODE=builtin
             ;;
-        fb0)
-            SYMBOL=FB_STM32F429_DISCO_SIMPLE
-            MODULE_NAME=""
-            PROJECT_FRAGMENT=config/fb0.fragment
-            DEFAULT_MODE=builtin
-            ;;
         *)
             die "profil inconnu : ${PROFILE:-<absent>}"
             ;;
@@ -137,7 +127,7 @@ resolve_profile() {
         *) die "--target attend qemu ou stm32" ;;
     esac
     case "$PROFILE:$TARGET" in
-        kmod-hello:qemu|kmod-hello:stm32|evtbuf:qemu|evtbuf:stm32|stm32gpio:stm32|stm32evt:stm32|fb0:stm32)
+        kmod-hello:qemu|kmod-hello:stm32|evtbuf:qemu|evtbuf:stm32|stm32gpio:stm32|stm32evt:stm32)
             ;;
         *)
             die "le profil $PROFILE ne prend pas en charge la cible $TARGET"
@@ -153,9 +143,6 @@ resolve_profile() {
         module|builtin) ;;
         *) die "--mode attend module ou builtin" ;;
     esac
-    if [[ "$PROFILE" == fb0 && "$MODE" != builtin ]]; then
-        die "fb0 est une capacité intégrée de la plateforme ; utilisez --mode builtin"
-    fi
 
     if [[ "$TARGET" == qemu ]]; then
         OUT="$QEMU_OUT"
@@ -164,17 +151,17 @@ resolve_profile() {
     fi
 
     MANAGED_DIR="$STATE_DIR/driver-lab/$TARGET"
-    ACTIVE_KERNEL_FRAGMENT="$MANAGED_DIR/linux-$PROFILE.fragment"
+    ACTIVE_KERNEL_FRAGMENT="$MANAGED_DIR/linux-current.fragment"
     ACTIVE_BUSYBOX_FRAGMENT="$MANAGED_DIR/busybox-modules.fragment"
-    ACTIVE_DTS="$MANAGED_DIR/stm32f429-disco-$PROFILE.dts"
-    ACTIVE_POST_BUILD="$MANAGED_DIR/stm32-$PROFILE-post-build.sh"
+    ACTIVE_DTS="$MANAGED_DIR/stm32f429-disco-current.dts"
+    ACTIVE_POST_BUILD="$MANAGED_DIR/stm32-current-post-build.sh"
     APPLIED_CONFIG_STATE="$MANAGED_DIR/applied-linux-config.sha256"
+    ACTIVE_SELECTION_STATE="$MANAGED_DIR/current-selection"
 }
 
 validate_project() {
     local api
 
-    [[ "$PROFILE" == fb0 ]] && return 0
     [[ -d "$PROJECT_DIR/.git" ]] || die "dépôt étudiant absent : $PROJECT_DIR"
     check_file_nonempty "$PROJECT_DIR/course.lock"
     api="$(sed -n 's/^UCLINUX_HELPERS_API=//p' "$PROJECT_DIR/course.lock" | head -n1)"
@@ -218,6 +205,21 @@ append_word() {
     fi
 }
 
+cleanup_legacy_managed_state() {
+    local path
+
+    for path in "$MANAGED_DIR"/linux-*.fragment "$MANAGED_DIR"/stm32f429-disco-*.dts "$MANAGED_DIR"/stm32-*-post-build.sh; do
+        [[ -e "$path" ]] || continue
+        case "$path" in
+            "$ACTIVE_KERNEL_FRAGMENT"|"$ACTIVE_DTS"|"$ACTIVE_POST_BUILD")
+                ;;
+            *)
+                rm -f -- "$path"
+                ;;
+        esac
+    done
+}
+
 ensure_base_config() {
     uclinux_require_buildroot
     mkdir -p "$OUT" "$MANAGED_DIR"
@@ -237,11 +239,6 @@ write_active_kernel_fragment() {
     local source_fragment="$PROJECT_DIR/$PROJECT_FRAGMENT"
 
     mkdir -p "$MANAGED_DIR"
-    if [[ "$PROFILE" == fb0 ]]; then
-        printf 'CONFIG_FB_STM32F429_DISCO_SIMPLE=y\n' >"$ACTIVE_KERNEL_FRAGMENT"
-        return 0
-    fi
-
     sed -E "/^(# )?CONFIG_${SYMBOL}(=| is not set)/d" "$source_fragment" >"$ACTIVE_KERNEL_FRAGMENT"
     if [[ "$MODE" == module ]]; then
         {
@@ -350,6 +347,8 @@ configure_buildroot() {
         "$config_tool" "${config_args[@]}"
     run_with_log "$LOG_DIR/driver-$PROFILE-olddefconfig-$TIMESTAMP.log" \
         make_br "$OUT" olddefconfig
+    printf 'target=%s\nprofile=%s\nmode=%s\n' "$TARGET" "$PROFILE" "$MODE" >"$ACTIVE_SELECTION_STATE"
+    cleanup_legacy_managed_state
 }
 
 find_linux_dir() {
@@ -376,7 +375,6 @@ stage_student_kernel() {
     local copied=0
     local unchanged=0
 
-    [[ "$PROFILE" == fb0 ]] && return 0
     LINUX_DIR="$(find_linux_dir)" || die "arbre Linux extrait introuvable dans $OUT/build"
     course_dir="$LINUX_DIR/drivers/misc/uclinux_course"
     misc_kconfig="$LINUX_DIR/drivers/misc/Kconfig"
@@ -424,9 +422,7 @@ configuration_fingerprint() {
                 printf 'missing\n'
             fi
         done
-        if [[ "$PROFILE" != fb0 ]]; then
-            sha256sum -- "$PROJECT_DIR/kernel/Kconfig"
-        fi
+        sha256sum -- "$PROJECT_DIR/kernel/Kconfig"
     } | sha256sum | awk '{print $1}'
 }
 
@@ -564,6 +560,7 @@ show_paths() {
     printf 'output=%s\n' "$OUT"
     printf 'logs=%s\n' "$LOG_DIR"
     printf 'managed=%s\n' "$MANAGED_DIR"
+    printf 'selection=%s\n' "$ACTIVE_SELECTION_STATE"
     if [[ "$TARGET" == stm32 ]]; then
         printf 'post_build=%s\n' "$ACTIVE_POST_BUILD"
     fi
@@ -579,23 +576,86 @@ show_paths() {
 
 show_config() {
     local kernel_config
+    local symbol
+    local effective
+    local buildroot_fragments
+    local configured_profile=""
 
     [[ -s "$OUT/.config" ]] || die "configuration Buildroot absente : $OUT/.config"
-    printf 'Buildroot fragments :\n'
-    printf '  %s\n' "$(br_config_value "$OUT/.config" BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES)"
-    printf 'Buildroot DTS :\n'
-    printf '  %s\n' "$(br_config_value "$OUT/.config" BR2_LINUX_KERNEL_CUSTOM_DTS_PATH)"
+    if [[ -s "$ACTIVE_SELECTION_STATE" ]]; then
+        configured_profile="$(sed -n 's/^profile=//p' "$ACTIVE_SELECTION_STATE")"
+        [[ "$configured_profile" == "$PROFILE" ]] ||
+            die "profil actif pour $TARGET : $configured_profile ; utilisez show-config $configured_profile --target $TARGET"
+    fi
+
+    printf 'Sélection courante : '
+    printf '%s\n' "$ACTIVE_SELECTION_STATE"
+    if [[ -s "$ACTIVE_SELECTION_STATE" ]]; then
+        sed 's/^/  /' "$ACTIVE_SELECTION_STATE"
+    else
+        printf '  <absente ; prochain prepare/build créera cette sélection>\n'
+    fi
+    printf '\n'
+
+    printf 'Fragment étudiant (prérequis uniquement) : '
+    printf '%s/%s\n' "$PROJECT_DIR" "$PROJECT_FRAGMENT"
+    sed -n -E '/^(#|CONFIG_)/p' "$PROJECT_DIR/$PROJECT_FRAGMENT"
+    printf '\n'
+
+    buildroot_fragments="$(br_config_value "$OUT/.config" BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES)"
+    printf 'Configuration demandée par driver.sh et appliquée par Buildroot : '
+    printf '%s\n' "$ACTIVE_KERNEL_FRAGMENT"
+    case " $buildroot_fragments " in
+        *" $ACTIVE_KERNEL_FRAGMENT "*)
+            printf '  état : appliquée par BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES\n'
+            ;;
+        *)
+            printf '  état : pas encore appliquée ; exécuter prepare ou build\n'
+            printf '  fragments actuellement appliqués : %s\n' "$buildroot_fragments"
+            ;;
+    esac
+    if [[ -s "$ACTIVE_KERNEL_FRAGMENT" ]]; then
+        sed -n -E '/^(# )?CONFIG_[A-Za-z0-9_]+(=| is not set)/p' "$ACTIVE_KERNEL_FRAGMENT"
+    else
+        printf '  <non générée>\n'
+    fi
+
     LINUX_DIR="$(find_linux_dir || true)"
-    [[ -n "$LINUX_DIR" ]] || return 0
+    [[ -n "$LINUX_DIR" ]] || {
+        printf 'Configuration noyau effective : <arbre Linux non extrait>\n'
+        return 0
+    }
+    printf '\n'
+
     kernel_config="$LINUX_DIR/.config"
-    [[ -s "$kernel_config" ]] || return 0
-    printf 'Configuration noyau effective :\n'
-    grep -E "^(CONFIG_${SYMBOL}=|# CONFIG_${SYMBOL} is not set|CONFIG_MODULES=|# CONFIG_MODULES is not set)" "$kernel_config" || true
+    printf 'Configuration noyau effective après résolution Kconfig : '
+    printf '%s\n' "$kernel_config"
+    [[ -s "$kernel_config" ]] || {
+        printf '  <.config absente>\n'
+        return 0
+    }
+    [[ -s "$ACTIVE_KERNEL_FRAGMENT" ]] || return 0
+
+    while IFS= read -r symbol; do
+        effective="$(grep -E "^$symbol=|^# $symbol is not set$" "$kernel_config" | head -n1 || true)"
+        if [[ -n "$effective" ]]; then
+            printf '%s\n' "$effective"
+        else
+            printf '%s=<absent de .config>\n' "$symbol"
+        fi
+    done < <(sed -n -E 's/^(# )?(CONFIG_[A-Za-z0-9_]+)(=.*| is not set)$/\2/p' "$ACTIVE_KERNEL_FRAGMENT" | sort -u)
 }
 
 show_dtb() {
+    local configured_profile=""
     local dtb_name
     local dtb
+
+    if [[ -s "$ACTIVE_SELECTION_STATE" ]]; then
+        configured_profile="$(sed -n 's/^profile=//p' "$ACTIVE_SELECTION_STATE")"
+        [[ "$configured_profile" == "$PROFILE" ]] ||
+            die "profil actif pour $TARGET : $configured_profile ; utilisez show-dtb $configured_profile --target $TARGET"
+    fi
 
     [[ "$TARGET" == stm32 ]] || die "le profil $PROFILE n'utilise pas le DT STM32"
     if [[ -s "$OUT/.config" ]]; then
@@ -612,23 +672,12 @@ show_dtb() {
     die "aucun DTB construit ni DTS généré pour $PROFILE"
 }
 
-flash_profile() {
-    local -a args=(flash --root "$WORK_ROOT" --output "$STM32_OUT")
-
-    [[ "$TARGET" == stm32 ]] || die "flash est réservé aux profils STM32"
-    ((VERIFY_FLASH)) && args+=(--verify)
-    exec "$SCRIPT_DIR/run_openocd_stm32.sh" "${args[@]}"
-}
-
 COMMAND=${1:-}
 case "$COMMAND" in
-    prepare|build|paths|show-config|show-dtb|flash)
+    prepare|build|paths|show-config|show-dtb)
         [[ $# -ge 2 ]] || { usage >&2; exit 2; }
         PROFILE=$2
         shift 2
-        ;;
-    console)
-        shift
         ;;
     -h|--help|"")
         usage
@@ -641,7 +690,6 @@ case "$COMMAND" in
         ;;
 esac
 
-CONSOLE_ARGS=()
 while (($#)); do
     case "$1" in
         --project)
@@ -673,10 +721,6 @@ while (($#)); do
             DRY_RUN=1
             shift
             ;;
-        --verify)
-            VERIFY_FLASH=1
-            shift
-            ;;
         --quiet)
             QUIET=1
             shift
@@ -685,11 +729,6 @@ while (($#)); do
             DEBUG_TRACE=1
             shift
             ;;
-        --device)
-            [[ "$COMMAND" == console && $# -ge 2 ]] || die "--device s'utilise avec console et attend un chemin"
-            CONSOLE_ARGS+=(--device "$2")
-            shift 2
-            ;;
         -h|--help)
             usage
             exit 0
@@ -697,10 +736,6 @@ while (($#)); do
         *) die "option inconnue : $1" ;;
     esac
 done
-
-if [[ "$COMMAND" == console ]]; then
-    exec "$SCRIPT_DIR/connect_stm32_console.sh" "${CONSOLE_ARGS[@]}"
-fi
 
 WORK_ROOT="$(uclinux_realpath "$WORK_ROOT")"
 PROJECT_DIR="$(uclinux_realpath "$PROJECT_DIR")"
@@ -719,9 +754,6 @@ case "$COMMAND" in
         ;;
     show-dtb)
         show_dtb
-        ;;
-    flash)
-        flash_profile
         ;;
     prepare|build)
         if ((DRY_RUN)); then
