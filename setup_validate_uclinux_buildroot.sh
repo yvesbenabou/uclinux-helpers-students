@@ -28,17 +28,14 @@ Utilisation :
 
 Options :
   --root CHEMIN              Racine de travail, défaut : $UCLINUX_ROOT ou $HOME/uclinux
-  --jobs N                   Nombre de compilations parallèles
   --skip-apt                 Ne pas installer les paquets Ubuntu
   --quick                    S'arrêter après les configurations Buildroot
   --allow-other-release      Accepter une version Ubuntu autre que 24.04
   --quiet                    Masquer la sortie verbeuse des commandes longues
   --debug                    Tracer l'entrée et la sortie des fonctions
-  --no-resume                Ignorer les builds déjà marqués comme réussis
-  --force-step NOM           Réexécuter un build réussi (build-qemu, build-stm32)
   -h, --help                 Afficher cette aide
 
-Le script est réexécutable. Il ne supprime ni les sources, ni les sorties.
+Le script est réexécutable ; Buildroot réutilise ses sorties incrémentales.
 Chaque étape peut aussi être lancée directement.
 USAGE
 }
@@ -50,29 +47,11 @@ while (($#)); do
             WORK_ROOT=$2
             shift 2
             ;;
-        --jobs)
-            [[ $# -ge 2 && "$2" =~ ^[1-9][0-9]*$ ]] || {
-                echo "ERREUR : --jobs attend un entier strictement positif." >&2
-                exit 2
-            }
-            JOBS=$2
-            shift 2
-            ;;
         --skip-apt) SKIP_APT=1; shift ;;
         --quick) QUICK=1; shift ;;
         --allow-other-release) ALLOW_OTHER_RELEASE=1; shift ;;
         --quiet) QUIET=1; shift ;;
         --debug) DEBUG_TRACE=1; shift ;;
-        --no-resume) RESUME=0; shift ;;
-        --force-step)
-            [[ $# -ge 2 ]] || { echo "ERREUR : --force-step attend un nom d'étape." >&2; exit 2; }
-            case "$2" in
-                build-qemu|build-stm32) ;;
-                *) echo "ERREUR : étape inconnue pour --force-step : $2" >&2; exit 2 ;;
-            esac
-            FORCE_STEPS+=("$2")
-            shift 2
-            ;;
         -h|--help) usage; exit 0 ;;
         *) echo "ERREUR : option inconnue : $1" >&2; usage; exit 2 ;;
     esac
@@ -88,8 +67,7 @@ SETUP_ARGS=("${COMMON_ARGS[@]}")
 ((SKIP_APT)) && SETUP_ARGS+=(--skip-apt)
 ((ALLOW_OTHER_RELEASE)) && SETUP_ARGS+=(--allow-other-release)
 
-BUILD_ARGS=("${COMMON_ARGS[@]}" --jobs "$JOBS")
-((RESUME)) || BUILD_ARGS+=(--no-resume)
+BUILD_ARGS=("${COMMON_ARGS[@]}")
 
 section "Exécution de l'étape 1/4"
 "$SCRIPT_DIR/1_setup_validation.sh" "${SETUP_ARGS[@]}"
@@ -103,16 +81,11 @@ if ((QUICK)); then
     exit 0
 fi
 
-QEMU_ARGS=("${BUILD_ARGS[@]}")
-STM32_ARGS=("${BUILD_ARGS[@]}")
-force_step_requested build-qemu && QEMU_ARGS+=(--force)
-force_step_requested build-stm32 && STM32_ARGS+=(--force)
-
 section "Exécution de l'étape 3/4"
-"$SCRIPT_DIR/3_uclinux_qemu_dl_and_build.sh" "${QEMU_ARGS[@]}"
+"$SCRIPT_DIR/3_uclinux_qemu_dl_and_build.sh" "${BUILD_ARGS[@]}"
 
 section "Exécution de l'étape 4/4"
-"$SCRIPT_DIR/4_uclinux_stm32_dl_and_build.sh" "${STM32_ARGS[@]}"
+"$SCRIPT_DIR/4_uclinux_stm32_dl_and_build.sh" "${BUILD_ARGS[@]}"
 
 REPORT="$LOG_DIR/report-$TIMESTAMP.txt"
 cat >"$REPORT" <<EOFREPORT
