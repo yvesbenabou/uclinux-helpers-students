@@ -26,15 +26,9 @@ uclinux_step_build_qemu() {
     uclinux_require_buildroot
     uclinux_ensure_qemu_config
     uclinux_enable_host_environment_setup "$QEMU_OUT"
-    prepare_linux_override "$QEMU_OUT"
 
-    section "Construction complète QEMU ARM VExpress"
-    QEMU_BUILD_FINGERPRINT="$(step_fingerprint "$QEMU_OUT")"
-    if step_completed "build-qemu" "$QEMU_BUILD_FINGERPRINT"; then
-        ok "étape déjà validée, make QEMU ignoré (--force pour la relancer)"
-    else
-        run_with_log "$LOG_DIR/build-qemu-$TIMESTAMP.log" make_br "$QEMU_OUT" -j"$JOBS"
-    fi
+    section "Construction incrémentale QEMU ARM VExpress"
+    run_with_log "$LOG_DIR/build-qemu-$TIMESTAMP.log" make_br "$QEMU_OUT"
 
     QEMU_IMAGES=(
         "$QEMU_OUT/images/zImage"
@@ -45,7 +39,6 @@ uclinux_step_build_qemu() {
     check_file_nonempty "$QEMU_OUT/host/bin/qemu-system-arm"
     file "$QEMU_OUT/host/bin/qemu-system-arm"
     ok "cible QEMU et émulateur hôte construits"
-    mark_step_completed "build-qemu" "$QEMU_BUILD_FINGERPRINT"
 
     printf '\nImages QEMU générées :\n'
     find "$QEMU_OUT/images" -maxdepth 1 -type f -printf '  %-38f %10s octets\n' | sort
@@ -69,9 +62,6 @@ Utilisation :
 
 Options :
   --root CHEMIN       Racine de travail, défaut : $UCLINUX_ROOT ou $HOME/uclinux
-  --jobs N            Nombre de compilations parallèles
-  --force             Réexécuter le build QEMU même s'il est marqué réussi
-  --no-resume         Ignorer les étapes déjà marquées comme réussies
   --test              Lancer un test QEMU court après le build
   --test-timeout N    Durée du test QEMU, défaut : 10 secondes
   --quiet             Masquer la sortie verbeuse des commandes longues
@@ -87,24 +77,6 @@ while (($#)); do
             WORK_ROOT=$2
             shift 2
             ;;
-        --jobs)
-            [[ $# -ge 2 && "$2" =~ ^[1-9][0-9]*$ ]] || {
-                echo "ERREUR : --jobs attend un entier strictement positif." >&2
-                exit 2
-            }
-            JOBS=$2
-            shift 2
-            ;;
-        --force)
-            FORCE_STEPS+=("build-qemu")
-            shift
-            ;;
-        --force-step)
-            [[ $# -ge 2 && "$2" == "build-qemu" ]] || { echo "ERREUR : --force-step attend build-qemu." >&2; exit 2; }
-            FORCE_STEPS+=("build-qemu")
-            shift 2
-            ;;
-        --no-resume) RESUME=0; shift ;;
         --test) QEMU_TEST=1; shift ;;
         --test-timeout)
             [[ $# -ge 2 && "$2" =~ ^[1-9][0-9]*$ ]] || {
