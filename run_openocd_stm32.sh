@@ -106,23 +106,15 @@ find_unique_glob() {
 find_linux_config() {
     local br_config=$1
     local version
-    local candidates=()
-    local candidate
+    local config
 
     version="$(config_value "$br_config" BR2_LINUX_KERNEL_VERSION)"
     [[ -n "$version" ]] || version="$(config_value "$br_config" BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE)"
+    [[ -n "$version" ]] || die "version Linux absente de $br_config"
 
-    candidates+=("$STM32_OUT/build/linux-custom/.config")
-    [[ -z "$version" ]] || candidates+=("$STM32_OUT/build/linux-$version/.config")
-
-    for candidate in "${candidates[@]}"; do
-        if [[ -s "$candidate" ]]; then
-            printf '%s\n' "$candidate"
-            return 0
-        fi
-    done
-
-    die "configuration Linux construite introuvable dans $STM32_OUT/build"
+    config="$STM32_OUT/build/linux-$version/.config"
+    [[ -s "$config" ]] || die "configuration Linux construite introuvable : $config"
+    printf '%s\n' "$config"
 }
 
 usage() {
