@@ -93,6 +93,7 @@ uclinux_reconcile_stm32_images() {
 uclinux_step_build_stm32() {
     local asset_dir="$SCRIPT_DIR/stm32_romfs"
     local linux_inputs_state="$STATE_DIR/linux-stm32-inputs.sha256"
+    local linux_config="$STM32_OUT/build/linux-$EXPECTED_LINUX_VERSION/.config"
     local previous_linux_inputs=""
     local package
 
@@ -115,6 +116,11 @@ uclinux_step_build_stm32() {
         && "$previous_linux_inputs" != "$STM32_LINUX_INPUTS_FINGERPRINT" ]]; then
         run_with_log "$LOG_DIR/dirclean-linux-stm32-$TIMESTAMP.log" \
             make_br "$STM32_OUT" linux-dirclean
+    elif [[ ! -s "$linux_config" ]] \
+        || ! grep -qx 'CONFIG_SPI_STM32=y' "$linux_config" \
+        || ! grep -qx 'CONFIG_FB_STM32=y' "$linux_config"; then
+        run_with_log "$LOG_DIR/reconfigure-linux-stm32-$TIMESTAMP.log" \
+            make_br "$STM32_OUT" linux-reconfigure
     fi
 
     for package in "${REBUILD_PACKAGES[@]}"; do
