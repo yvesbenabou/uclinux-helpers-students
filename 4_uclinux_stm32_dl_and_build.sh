@@ -13,19 +13,12 @@ linux_build_dir() {
     local __fn="${FUNCNAME[0]}"
     local out=$1
     local version=$2
-    local dir
+    local dir="$out/build/linux-$version"
 
     debug_enter "$__fn"
-    for dir in "$out/build/linux-custom" "$out/build/linux-$version"; do
-        if [[ -d "$dir" ]]; then
-            printf '%s\n' "$dir"
-            debug_exit "$__fn" 0
-            return 0
-        fi
-    done
-
-    debug_exit "$__fn" 1
-    die "répertoire de build Linux introuvable (cherché : $out/build/linux-custom, $out/build/linux-$version)"
+    [[ -d "$dir" ]] || die "répertoire de build Linux introuvable : $dir"
+    printf '%s\n' "$dir"
+    debug_exit "$__fn" 0
 }
 
 uboot_build_dir() {
@@ -62,24 +55,11 @@ uclinux_step_build_stm32() {
     uclinux_require_buildroot
     uclinux_ensure_stm32_config
     uclinux_enable_host_environment_setup "$STM32_OUT"
-    prepare_linux_override "$STM32_OUT"
 
-    section "Construction complète STM32F429I-DISC1"
-    STM32_BUILD_FINGERPRINT="$(step_fingerprint "$STM32_OUT" \
-        "$SCRIPT_DIR/4_uclinux_stm32_dl_and_build.sh" \
-        "$SCRIPT_DIR/uclinux_common.sh" \
-        "$asset_dir/linux.fragment" \
-        "$asset_dir/uboot.fragment" \
-        "$asset_dir/post_image.sh")"
-    if step_completed "build-stm32" "$STM32_BUILD_FINGERPRINT"; then
-        ok "étape déjà validée, make STM32 ignoré (--force pour la relancer)"
-    else
-        # Reapply both configuration fragments when switching from an afboot
-        # output tree or after editing one of the course assets.
-        run_with_log "$LOG_DIR/reconfigure-linux-stm32-$TIMESTAMP.log" make_br "$STM32_OUT" linux-reconfigure
-        run_with_log "$LOG_DIR/reconfigure-uboot-stm32-$TIMESTAMP.log" make_br "$STM32_OUT" uboot-reconfigure
-        run_with_log "$LOG_DIR/build-stm32-$TIMESTAMP.log" make_br "$STM32_OUT" -j"$JOBS"
-    fi
+    section "Construction incrémentale STM32F429I-DISC1"
+    run_with_log "$LOG_DIR/reconfigure-linux-stm32-$TIMESTAMP.log" make_br "$STM32_OUT" linux-reconfigure
+    run_with_log "$LOG_DIR/reconfigure-uboot-stm32-$TIMESTAMP.log" make_br "$STM32_OUT" uboot-reconfigure
+    run_with_log "$LOG_DIR/build-stm32-$TIMESTAMP.log" make_br "$STM32_OUT"
 
     STALE_AFBOOT_IMAGES=(
         stm32f429i-disco.bin stm32429i-eval.bin stm32746g-eval.bin
@@ -186,7 +166,6 @@ uclinux_step_build_stm32() {
     grep -q '/dts-v1/' "$DT_DUMP" || die "le DTB n'a pas pu être décompilé correctement."
     grep -q 'bootargs = "root=/dev/ram";' "$DT_DUMP" || die "bootargs initramfs absents du DTB."
     ok "DTB valide à $STM32_DTB_ADDR ; décompilation enregistrée dans $DT_DUMP"
-    mark_step_completed "build-stm32" "$STM32_BUILD_FINGERPRINT"
 
     printf '\nImages STM32 générées :\n'
     find "$STM32_OUT/images" -maxdepth 1 -type f -printf '  %-38f %10s octets\n' | sort
@@ -206,9 +185,6 @@ Utilisation :
 
 Options :
   --root CHEMIN   Racine de travail, défaut : $UCLINUX_ROOT ou $HOME/uclinux
-  --jobs N        Nombre de compilations parallèles
-  --force         Réexécuter le build STM32 même s'il est marqué réussi
-  --no-resume     Ignorer les étapes déjà marquées comme réussies
   --quiet         Masquer la sortie verbeuse des commandes longues
   --debug         Tracer l'entrée et la sortie des fonctions
   -h, --help      Afficher cette aide
@@ -222,24 +198,6 @@ while (($#)); do
             WORK_ROOT=$2
             shift 2
             ;;
-        --jobs)
-            [[ $# -ge 2 && "$2" =~ ^[1-9][0-9]*$ ]] || {
-                echo "ERREUR : --jobs attend un entier strictement positif." >&2
-                exit 2
-            }
-            JOBS=$2
-            shift 2
-            ;;
-        --force)
-            FORCE_STEPS+=("build-stm32")
-            shift
-            ;;
-        --force-step)
-            [[ $# -ge 2 && "$2" == "build-stm32" ]] || { echo "ERREUR : --force-step attend build-stm32." >&2; exit 2; }
-            FORCE_STEPS+=("build-stm32")
-            shift 2
-            ;;
-        --no-resume) RESUME=0; shift ;;
         --quiet) QUIET=1; shift ;;
         --debug) DEBUG_TRACE=1; shift ;;
         -h|--help) usage; exit 0 ;;

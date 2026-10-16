@@ -47,7 +47,6 @@ run_logged() {
 : "${BUILDROOT_REF:=2025.08}"
 : "${EXPECTED_LINUX_VERSION:=6.1.133}"
 : "${EXPECTED_UBOOT_VERSION:=2025.07}"
-: "${LINUX_STABLE_GIT_URL:=https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git}"
 : "${WORK_ROOT:=$(uclinux_default_root)}"
 : "${STM32_UBOOT_ADDR:=0x08000000}"
 : "${STM32_UBOOT_ENV_ADDR:=0x08020000}"
@@ -59,20 +58,11 @@ run_logged() {
 : "${STM32_STUDENT_HEADROOM:=102400}"
 : "${QUIET:=0}"
 : "${DEBUG_TRACE:=0}"
-: "${RESUME:=1}"
 : "${C_BOLD:=}"
 : "${C_GREEN:=}"
 : "${C_YELLOW:=}"
 : "${C_RED:=}"
 : "${C_RESET:=}"
-
-if [[ -z "${JOBS:-}" ]]; then
-    JOBS="$(nproc 2>/dev/null || echo 2)"
-fi
-
-if ! declare -p FORCE_STEPS >/dev/null 2>&1; then
-    FORCE_STEPS=()
-fi
 
 uclinux_resolve_paths() {
     WORK_ROOT="$(uclinux_realpath "$WORK_ROOT")"
@@ -245,123 +235,6 @@ br_config_value() {
     value="${value#\"}"
     printf '%s\n' "$value"
     debug_exit "$__fn" 0
-}
-
-prepare_linux_override() {
-    local __fn="${FUNCNAME[0]}"
-    local out=$1
-    local config="$out/.config"
-    local version
-    local source_dir
-    local local_mk="$out/local.mk"
-
-    debug_enter "$__fn"
-    version="$(br_config_value "$config" BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE)"
-    if [[ -z "$version" ]]; then
-        debug_exit "$__fn" 0
-        return 0
-    fi
-
-    source_dir="$WORK_ROOT/linux-$version"
-    if [[ ! -e "$source_dir/.git" ]]; then
-        if [[ -e "$source_dir" ]]; then
-            die "le chemin existe mais n'est pas un dépôt git : $source_dir"
-        fi
-        info "Clone superficiel Linux $version : $source_dir"
-        run_with_log "$LOG_DIR/linux-$version-clone-$TIMESTAMP.log" git clone --depth 1 --branch "v$version" "$LINUX_STABLE_GIT_URL" "$source_dir"
-    else
-        info "Source Linux $version déjà présente : $source_dir"
-        if ! git -C "$source_dir" rev-parse --verify "v$version^{commit}" >/dev/null 2>&1; then
-            run_with_log "$LOG_DIR/linux-$version-fetch-$TIMESTAMP.log" git -C "$source_dir" fetch --depth 1 origin "refs/tags/v$version:refs/tags/v$version"
-        fi
-    fi
-
-    git -C "$source_dir" rev-parse --verify "v$version^{commit}" >/dev/null \
-        || die "tag Linux v$version absent dans $source_dir"
-    git -C "$source_dir" checkout -q "v$version"
-
-    mkdir -p "$out"
-    if [[ -f "$local_mk" ]]; then
-        sed -i '/^LINUX_OVERRIDE_SRCDIR[[:space:]]*=/d' "$local_mk"
-    fi
-    printf 'LINUX_OVERRIDE_SRCDIR = %s\n' "$source_dir" >> "$local_mk"
-    ok "Buildroot utilisera Linux $version depuis $source_dir"
-    debug_exit "$__fn" 0
-}
-
-force_step_requested() {
-    local __fn="${FUNCNAME[0]}"
-    local step=$1
-    local forced
-
-    debug_enter "$__fn"
-    for forced in "${FORCE_STEPS[@]}"; do
-        if [[ "$forced" == "$step" ]]; then
-            debug_exit "$__fn" 0
-            return 0
-        fi
-    done
-    debug_exit "$__fn" 1
-    return 1
-}
-
-step_marker() {
-    local __fn="${FUNCNAME[0]}"
-
-    debug_enter "$__fn"
-    printf '%s/%s.ok\n' "$STATE_DIR" "$1"
-    debug_exit "$__fn" 0
-}
-
-step_completed() {
-    local __fn="${FUNCNAME[0]}"
-    local step=$1
-    local fingerprint=${2:-}
-    local marker
-
-    debug_enter "$__fn"
-    if ((RESUME)) && ! force_step_requested "$step"; then
-        marker="$(step_marker "$step")"
-        if [[ -f "$marker" ]] && grep -qx "buildroot=$BUILDROOT_REF" "$marker"; then
-            if [[ -z "$fingerprint" ]] || grep -qx "fingerprint=$fingerprint" "$marker"; then
-                debug_exit "$__fn" 0
-                return 0
-            fi
-        fi
-    fi
-
-    debug_exit "$__fn" 1
-    return 1
-}
-
-mark_step_completed() {
-    local __fn="${FUNCNAME[0]}"
-    local step=$1
-    local fingerprint=${2:-}
-
-    debug_enter "$__fn"
-    {
-        printf 'date=%s\n' "$(date --iso-8601=seconds)"
-        printf 'buildroot=%s\n' "$BUILDROOT_REF"
-        [[ -z "$fingerprint" ]] || printf 'fingerprint=%s\n' "$fingerprint"
-    } >"$(step_marker "$step")"
-    debug_exit "$__fn" 0
-}
-
-step_fingerprint() {
-    local __fn="${FUNCNAME[0]}"
-    local out=$1
-    local files=("$out/.config")
-    local rc
-
-    debug_enter "$__fn"
-    shift
-    [[ -f "$out/local.mk" ]] && files+=("$out/local.mk")
-    files+=("$@")
-    sha256sum "${files[@]}" | sha256sum | awk '{print $1}'
-    rc=${PIPESTATUS[0]}
-    debug_exit "$__fn" "$rc"
-    return "$rc"
 }
 
 section() {
