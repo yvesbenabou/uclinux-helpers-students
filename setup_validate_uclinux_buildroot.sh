@@ -15,7 +15,7 @@ source "$SCRIPT_DIR/uclinux_common.sh"
 
 usage() {
     cat <<'USAGE'
-Préparation et validation complète de l’environnement uClinux/Buildroot.
+Préparation et construction de l’environnement uClinux/Buildroot.
 
 Ce script exécute successivement :
   ./1_setup_validation.sh
@@ -76,7 +76,7 @@ section "Exécution de l'étape 2/4"
 "$SCRIPT_DIR/2_buildroot_download_and_configure.sh" "${COMMON_ARGS[@]}"
 
 if ((QUICK)); then
-    section "Validation rapide terminée"
+    section "Préparation rapide terminée"
     ok "configurations Buildroot générées ; builds non exécutés (--quick)"
     exit 0
 fi
@@ -89,7 +89,7 @@ section "Exécution de l'étape 4/4"
 
 REPORT="$LOG_DIR/report-$TIMESTAMP.txt"
 cat >"$REPORT" <<EOFREPORT
-VALIDATION COMPLÈTE RÉUSSIE
+PRÉPARATION ET CONSTRUCTION RÉUSSIES
 Date                  : $(date --iso-8601=seconds)
 Buildroot             : $BUILDROOT_REF
 Linux STM32           : $EXPECTED_LINUX_VERSION
@@ -107,4 +107,4 @@ EOFREPORT
 
 section "Rapport final"
 cat "$REPORT"
-printf '\n%sVALIDATION TERMINÉE AVEC SUCCÈS%s\n' "$C_GREEN" "$C_RESET"
+printf '\n%sPRÉPARATION ET CONSTRUCTION TERMINÉES AVEC SUCCÈS%s\n' "$C_GREEN" "$C_RESET"
