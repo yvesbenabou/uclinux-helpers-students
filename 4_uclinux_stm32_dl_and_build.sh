@@ -21,6 +21,19 @@ linux_build_dir() {
     debug_exit "$__fn" 0
 }
 
+uclinux_reconcile_stm32_images() {
+    local stale_image
+
+    # Ces fichiers sont produits par les variantes STM32 U-Boot ou ROMFS,
+    # jamais par cette variante AFBOOT avec initramfs.
+    for stale_image in u-boot.bin uImage rootfs.romfs rootfs.tar stm32f429-disco-romfs.dtb; do
+        if [[ -e "$STM32_OUT/images/$stale_image" ]]; then
+            rm -f -- "$STM32_OUT/images/$stale_image"
+            warn "image d'une autre variante supprimée : $stale_image"
+        fi
+    done
+}
+
 uclinux_ensure_stm32_config() {
     if [[ -s "$STM32_OUT/.config" ]] \
         && grep -q 'BR2_cortex_m4=y' "$STM32_OUT/.config" \
@@ -43,6 +56,14 @@ uclinux_step_build_stm32() {
     section "Construction incrémentale STM32F429I-DISC1"
     run_with_log "$LOG_DIR/reconfigure-linux-stm32-$TIMESTAMP.log" make_br "$STM32_OUT" linux-reconfigure
     run_with_log "$LOG_DIR/build-stm32-$TIMESTAMP.log" make_br "$STM32_OUT"
+
+    # U-Boot variants remove AFBOOT's binary.  Restore the package output
+    # when returning to this layout without rebuilding the whole tree.
+    if [[ ! -s "$STM32_OUT/images/stm32f429i-disco.bin" ]]; then
+        run_with_log "$LOG_DIR/reinstall-afboot-stm32-$TIMESTAMP.log" \
+            make_br "$STM32_OUT" afboot-stm32-reinstall
+    fi
+    uclinux_reconcile_stm32_images
 
     STM32_IMAGES=(
         "$STM32_OUT/images/stm32f429i-disco.bin"
