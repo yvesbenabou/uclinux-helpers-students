@@ -79,6 +79,16 @@ uclinux_step_build_stm32() {
         fi
     done
 
+    # These belong to the U-Boot or initramfs layouts, not this AFBOOT ROMFS
+    # layout.  Keeping them would make the images directory misleading.
+    STALE_OTHER_LAYOUT_IMAGES=(u-boot.bin uImage stm32f429-disco.dtb)
+    for stale_image in "${STALE_OTHER_LAYOUT_IMAGES[@]}"; do
+        if [[ -e "$STM32_OUT/images/$stale_image" ]]; then
+            rm -f -- "$STM32_OUT/images/$stale_image"
+            warn "image d'une autre variante supprimée : $stale_image"
+        fi
+    done
+
     DTB_NAME="$(uclinux_stm32_dtb_name "$STM32_OUT/.config")"
     [[ -n "$DTB_NAME" && "$DTB_NAME" != *" "* ]] || die "nom de DTB STM32 invalide : $DTB_NAME"
     DTB_IMAGE="$STM32_OUT/images/${DTB_NAME##*/}.dtb"
