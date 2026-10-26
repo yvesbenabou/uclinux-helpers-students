@@ -64,7 +64,6 @@ uclinux_resolve_paths() {
     LABS_DIR="$WORK_ROOT/labs"
     DOCS_DIR="$WORK_ROOT/documents"
     LOG_DIR="$WORK_ROOT/logs"
-    STATE_DIR="$WORK_ROOT/.setup_validate_state"
 }
 
 uclinux_begin_logging() {
@@ -75,7 +74,7 @@ uclinux_begin_logging() {
     MAIN_LOG="${MAIN_LOG:-$LOG_DIR/$prefix-$TIMESTAMP.log}"
     REPORT="${REPORT:-$LOG_DIR/report-$TIMESTAMP.txt}"
 
-    mkdir -p "$LOG_DIR" "$STATE_DIR"
+    mkdir -p "$LOG_DIR"
 
     if [[ "${UCLINUX_LOGGING_STARTED:-0}" -eq 0 ]]; then
         exec 3>&1
@@ -284,8 +283,8 @@ uclinux_enable_host_environment_setup() {
 uclinux_generate_stm32_config() {
     run_with_log "$LOG_DIR/defconfig-stm32-$TIMESTAMP.log" make_br "$STM32_OUT" stm32f429_disco_xip_defconfig
     check_file_nonempty "$STM32_OUT/.config"
-    grep -q 'BR2_cortex_m4=y' "$STM32_OUT/.config"
-    grep -q "BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE=\"$EXPECTED_LINUX_VERSION\"" "$STM32_OUT/.config"
+    grep -Fqx 'BR2_cortex_m4=y' "$STM32_OUT/.config"
+    grep -Fqx "BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE=\"$EXPECTED_LINUX_VERSION\"" "$STM32_OUT/.config"
     uclinux_enable_host_environment_setup "$STM32_OUT"
     ok "configuration active STM32 générée dans $STM32_OUT/.config"
 }
@@ -297,7 +296,7 @@ uclinux_generate_qemu_config() {
 
     run_with_log "$LOG_DIR/defconfig-qemu-$TIMESTAMP.log" make_br "$QEMU_OUT" qemu_arm_vexpress_defconfig
     check_file_nonempty "$QEMU_OUT/.config"
-    grep -q 'BR2_cortex_a9=y' "$QEMU_OUT/.config"
+    grep -Fqx 'BR2_cortex_a9=y' "$QEMU_OUT/.config"
     uclinux_enable_host_environment_setup "$QEMU_OUT"
     ok "configuration active QEMU générée dans $QEMU_OUT/.config"
 }

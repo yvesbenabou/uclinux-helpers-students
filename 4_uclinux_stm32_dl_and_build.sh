@@ -36,8 +36,8 @@ uclinux_reconcile_stm32_images() {
 
 uclinux_ensure_stm32_config() {
     if [[ -s "$STM32_OUT/.config" ]] \
-        && grep -q 'BR2_cortex_m4=y' "$STM32_OUT/.config" \
-        && grep -q "BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE=\"$EXPECTED_LINUX_VERSION\"" "$STM32_OUT/.config" \
+        && grep -Fqx 'BR2_cortex_m4=y' "$STM32_OUT/.config" \
+        && grep -Fqx "BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE=\"$EXPECTED_LINUX_VERSION\"" "$STM32_OUT/.config" \
         && grep -Fqx 'BR2_TARGET_ROOTFS_INITRAMFS=y' "$STM32_OUT/.config" \
         && grep -Fqx 'BR2_TARGET_AFBOOT_STM32=y' "$STM32_OUT/.config" \
         && [[ "$(br_config_value "$STM32_OUT/.config" BR2_LINUX_KERNEL_INTREE_DTS_NAME)" == "stm32f429-disco" ]] \
@@ -107,7 +107,11 @@ uclinux_step_build_stm32() {
     grep -q '/dts-v1/' "$DT_DUMP" || die "le DTB n'a pas pu être décompilé correctement."
     ok "DTB valide ; décompilation enregistrée dans $DT_DUMP"
 
-    printf '\nImages STM32 générées :\n'
+    printf '\nImages utiles pour la STM32F429I-DISC1 :\n'
+    for image in "${STM32_IMAGES[@]}"; do
+        printf '  %-38s %10s octets\n' "$(basename "$image")" "$(stat -c %s "$image")"
+    done
+    printf '\nInventaire complet Buildroot (diagnostic) :\n'
     find "$STM32_OUT/images" -maxdepth 1 -type f -printf '  %-38f %10s octets\n' | sort
 
     OPENOCD_STM32_RUNNER="$SCRIPT_DIR/run_openocd_stm32.sh"
