@@ -45,8 +45,8 @@ stm32_linux_inputs_fingerprint() {
 
 uclinux_ensure_stm32_config() {
     if [[ -s "$STM32_OUT/.config" ]] \
-        && grep -q 'BR2_cortex_m4=y' "$STM32_OUT/.config" \
-        && grep -q "BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE=\"$EXPECTED_LINUX_VERSION\"" "$STM32_OUT/.config" \
+        && grep -Fqx 'BR2_cortex_m4=y' "$STM32_OUT/.config" \
+        && grep -Fqx "BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE=\"$EXPECTED_LINUX_VERSION\"" "$STM32_OUT/.config" \
         && uclinux_stm32_romfs_configured "$STM32_OUT/.config"; then
         ok "configuration active STM32 déjà présente : $STM32_OUT/.config"
     else
@@ -253,7 +253,11 @@ uclinux_step_build_stm32() {
     ok "DTB valide : Flash complète et partition rootfs exacte, sans arrondi physmap ; décompilation dans $DT_DUMP"
     printf '%s\n' "$STM32_LINUX_INPUTS_FINGERPRINT" >"$linux_inputs_state"
 
-    printf '\nImages STM32 générées :\n'
+    printf '\nImages utiles pour la STM32F429I-DISC1 :\n'
+    for image in "${STM32_IMAGES[@]}"; do
+        printf '  %-38s %10s octets\n' "$(basename "$image")" "$(stat -c %s "$image")"
+    done
+    printf '\nInventaire complet Buildroot (diagnostic) :\n'
     find "$STM32_OUT/images" -maxdepth 1 -type f -printf '  %-38f %10s octets\n' | sort
 
     OPENOCD_STM32_RUNNER="$SCRIPT_DIR/run_openocd_stm32.sh"
