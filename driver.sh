@@ -390,6 +390,9 @@ reset_target_modules() {
     local modules_root="$OUT/target/lib/modules"
     local release_dir
 
+    # A fresh output has no installed modules to clean.
+    [[ -e "$modules_root" || -L "$modules_root" ]] || return 0
+
     check_file_nonempty "$release_file"
     kernel_release="$(<"$release_file")"
     [[ "$kernel_release" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ ]] \
