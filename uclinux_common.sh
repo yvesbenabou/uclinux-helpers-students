@@ -324,6 +324,11 @@ uclinux_stm32_romfs_configured() {
     local fragments
 
     [[ -s "$config" ]] || return 1
+    # ROMFS also exists on the U-Boot and framebuffer branches. Do not
+    # reuse their configuration when switching back to this AFBOOT branch.
+    grep -Fqx 'BR2_TARGET_AFBOOT_STM32=y' "$config" || return 1
+    [[ " $(br_config_value "$config" BR2_GLOBAL_PATCH_DIR) " != *" $asset_dir/patches "* ]] || return 1
+    [[ " $(br_config_value "$config" BR2_PACKAGE_BUSYBOX_CONFIG_FRAGMENT_FILES) " != *" $asset_dir/busybox.fragment "* ]] || return 1
     grep -Fqx '# BR2_TARGET_ROOTFS_INITRAMFS is not set' "$config" || return 1
     grep -Fqx '# BR2_TARGET_ROOTFS_CPIO is not set' "$config" || return 1
     grep -Fqx 'BR2_TARGET_ROOTFS_TAR=y' "$config" || return 1
