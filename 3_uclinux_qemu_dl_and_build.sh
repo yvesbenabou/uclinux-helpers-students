@@ -12,20 +12,9 @@ source "$SCRIPT_DIR/uclinux_common.sh"
 : "${QEMU_TEST:=0}"
 : "${QEMU_TEST_TIMEOUT:=10}"
 
-uclinux_ensure_qemu_config() {
-    if [[ -s "$QEMU_OUT/.config" ]] && grep -q 'BR2_cortex_a9=y' "$QEMU_OUT/.config"; then
-        ok "configuration active QEMU déjà présente : $QEMU_OUT/.config"
-    else
-        uclinux_generate_qemu_config
-    fi
-}
-
-
 uclinux_step_build_qemu() {
     section "Préparation des sources Linux QEMU"
-    uclinux_require_buildroot
-    uclinux_ensure_qemu_config
-    uclinux_enable_host_environment_setup "$QEMU_OUT"
+    uclinux_prepare_buildroot qemu
 
     section "Construction incrémentale QEMU ARM VExpress"
     run_with_log "$LOG_DIR/build-qemu-$TIMESTAMP.log" make_br "$QEMU_OUT"
