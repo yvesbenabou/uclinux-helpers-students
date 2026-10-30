@@ -40,6 +40,7 @@ uclinux_ensure_stm32_config() {
         && grep -Fqx "BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE=\"$EXPECTED_LINUX_VERSION\"" "$STM32_OUT/.config" \
         && grep -Fqx 'BR2_TARGET_ROOTFS_INITRAMFS=y' "$STM32_OUT/.config" \
         && grep -Fqx 'BR2_TARGET_AFBOOT_STM32=y' "$STM32_OUT/.config" \
+        && [[ " $(br_config_value "$STM32_OUT/.config" BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES) " != *" $SCRIPT_DIR/stm32_initramfs_fb/linux.fragment "* ]] \
         && [[ "$(br_config_value "$STM32_OUT/.config" BR2_LINUX_KERNEL_INTREE_DTS_NAME)" == "stm32f429-disco" ]] \
         && [[ -z "$(br_config_value "$STM32_OUT/.config" BR2_LINUX_KERNEL_CUSTOM_DTS_PATH)" ]]; then
         ok "configuration active STM32 déjà présente : $STM32_OUT/.config"
