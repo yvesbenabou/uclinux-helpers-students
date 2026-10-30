@@ -52,9 +52,9 @@ uclinux_step_buildroot_download_and_configure() {
     uclinux_check_buildroot_checkout
     uclinux_check_buildroot_defconfigs
 
-    section "6. Génération des configurations actives"
-    uclinux_generate_stm32_config
-    uclinux_generate_qemu_config
+    section "6. Préparation des configurations actives"
+    uclinux_prepare_buildroot stm32
+    uclinux_prepare_buildroot qemu
 }
 
 usage() {

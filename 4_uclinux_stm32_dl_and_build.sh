@@ -34,27 +34,13 @@ uclinux_reconcile_stm32_images() {
     done
 }
 
-uclinux_ensure_stm32_config() {
-    if [[ -s "$STM32_OUT/.config" ]] \
-        && grep -Fqx 'BR2_cortex_m4=y' "$STM32_OUT/.config" \
-        && grep -Fqx "BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE=\"$EXPECTED_LINUX_VERSION\"" "$STM32_OUT/.config" \
-        && uclinux_stm32_fb_configured "$STM32_OUT/.config"; then
-        ok "configuration active STM32 déjà présente : $STM32_OUT/.config"
-    else
-        uclinux_generate_stm32_config
-    fi
-}
-
 
 uclinux_step_build_stm32() {
     local asset_dir="$SCRIPT_DIR/stm32_initramfs_fb"
     section "Préparation des sources Linux STM32"
-    uclinux_require_buildroot
-    uclinux_ensure_stm32_config
-    uclinux_enable_host_environment_setup "$STM32_OUT"
+    uclinux_prepare_buildroot stm32
 
     section "Construction incrémentale STM32F429I-DISC1"
-    run_with_log "$LOG_DIR/reconfigure-linux-stm32-$TIMESTAMP.log" make_br "$STM32_OUT" linux-reconfigure
     run_with_log "$LOG_DIR/build-stm32-$TIMESTAMP.log" make_br "$STM32_OUT"
 
     # U-Boot variants remove AFBOOT's binary.  Restore the package output
@@ -111,7 +97,7 @@ uclinux_step_build_stm32() {
 
     check_file_nonempty "$STM32_OUT/host/bin/openocd"
     file "$STM32_OUT/host/bin/openocd"
-    "$STM32_OUT/host/bin/openocd" --version 2>&1 | head -n1
+    "$STM32_OUT/host/bin/openocd" --version 2>&1 | sed -n '1p'
     ok "OpenOCD hôte construit par Buildroot"
 
     DT_DUMP="$LOG_DIR/stm32f429-disco-$TIMESTAMP.dts"
