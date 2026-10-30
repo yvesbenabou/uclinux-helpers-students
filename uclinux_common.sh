@@ -416,7 +416,7 @@ uclinux_generate_stm32_config() {
     check_file_nonempty "$config_tool"
     check_file_nonempty "$asset_dir/linux.fragment"
     check_file_nonempty "$asset_dir/busybox.fragment"
-    check_file_nonempty "$asset_dir/patches/linux/0001-if-stm32-nommu-define-have-arch-fb-unmapped-area.patch" \
+    check_file_nonempty "$asset_dir/patches/linux/0001-if-stm32-nommu-define-have-arch-fb-unmapped-area.patch"
     check_file_nonempty "$asset_dir/patches/linux/0002-fbdev-add-stm32f429-disco-simplefb-init.patch"
     check_file_nonempty "$asset_dir/stm32f429-disco-romfs.dts"
     check_file_nonempty "$asset_dir/post_build.sh"

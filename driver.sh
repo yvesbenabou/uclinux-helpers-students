@@ -485,6 +485,7 @@ print_plan() {
     [[ -z "$MODULE_NAME" ]] || printf 'Source       : %s/kernel/%s.c\n' "$PROJECT_DIR" "$MODULE_NAME"
     printf 'Fragment     : %s\n' "$PROJECT_DIR/$PROJECT_FRAGMENT"
     [[ -z "$PROJECT_DTS" ]] || printf 'DTS fragment : %s/%s\n' "$PROJECT_DIR" "$PROJECT_DTS"
+    printf 'Préparation : reset si branche helpers modifiée ou .config absente\n'
     printf '\nCommandes de construction prévues :\n'
     show_command make -C "$BUILDROOT_DIR" O="$OUT" BR2_DL_DIR="$DOWNLOAD_DIR" linux-patch
     printf '  supprimer target/lib/modules/<version> avant de le reconstruire\n'
@@ -570,6 +571,7 @@ show_paths() {
     printf 'work_root=%s\n' "$WORK_ROOT"
     printf 'buildroot=%s\n' "$BUILDROOT_DIR"
     printf 'output=%s\n' "$OUT"
+    printf 'branch_marker=%s/.helpers-branch\n' "$OUT"
     printf 'logs=%s\n' "$LOG_DIR"
     printf 'managed=%s\n' "$MANAGED_DIR"
     printf 'selection=%s\n' "$ACTIVE_SELECTION_STATE"
