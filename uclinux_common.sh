@@ -292,7 +292,8 @@ uclinux_prepare_buildroot() {
     info "préparation $target pour $branch : reset Linux, BusyBox, target/ et images/"
     mkdir -p "$out"
     rm -f -- "$marker"
-    "uclinux_generate_${target}_config"
+    # Do not inherit an external tree belonging to the previous branch.
+    BR2_EXTERNAL="${BR2_EXTERNAL-}" "uclinux_generate_${target}_config"
     if grep -Fqx 'BR2_TARGET_UBOOT=y' "$out/.config"; then
         clean_packages+=(uboot-dirclean)
     fi
