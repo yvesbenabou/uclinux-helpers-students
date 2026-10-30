@@ -25,6 +25,7 @@ Buildroot configuration and DTB, keeping the student boot path small.
 
 ## Switching helpers branches
 
+
 Each target output records its prepared Git branch in `.helpers-branch`, for
 example `~/uclinux/outputs/stm32/.helpers-branch`. Setup (step 2) and builds
 (steps 3 and 4) use the same preparation function in `uclinux_common.sh`.
@@ -48,7 +49,6 @@ can resume without another reset. Git switching itself runs no hook. Updates
 within the same branch do not trigger a reset; this mechanism does not track
 same-branch changes to kernel patches or configuration fragments.
 
-This implementation currently exists only on this branch. Other helper
-branches must use the same entry point before the policy works in both
-directions. On driver-course branches, `driver.sh build` should call it before
-applying the selected student driver; inspection commands should not call it.
+On driver-course branches, `driver.sh build` calls the same preparation
+function before applying the selected lab profile. Inspection commands never
+reset the output. Driver sources remain in the separate student repository.
