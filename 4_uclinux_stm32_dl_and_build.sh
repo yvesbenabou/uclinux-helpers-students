@@ -47,6 +47,7 @@ uclinux_ensure_stm32_config() {
     if [[ -s "$STM32_OUT/.config" ]] \
         && grep -Fqx 'BR2_cortex_m4=y' "$STM32_OUT/.config" \
         && grep -Fqx "BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE=\"$EXPECTED_LINUX_VERSION\"" "$STM32_OUT/.config" \
+        && grep -Fqx 'BR2_TARGET_AFBOOT_STM32=y' "$STM32_OUT/.config" \
         && uclinux_stm32_romfs_configured "$STM32_OUT/.config"; then
         ok "configuration active STM32 déjà présente : $STM32_OUT/.config"
     else
@@ -118,7 +119,7 @@ uclinux_step_build_stm32() {
             make_br "$STM32_OUT" linux-dirclean
     elif [[ ! -s "$linux_config" ]] \
         || ! grep -qx 'CONFIG_SPI_STM32=y' "$linux_config" \
-        || ! grep -qx 'CONFIG_FB_STM32=y' "$linux_config"; then
+        || ! grep -qx 'CONFIG_FB_STM32F429_DISCO_SIMPLE=y' "$linux_config"; then
         run_with_log "$LOG_DIR/reconfigure-linux-stm32-$TIMESTAMP.log" \
             make_br "$STM32_OUT" linux-reconfigure
     fi

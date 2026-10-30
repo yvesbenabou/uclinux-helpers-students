@@ -68,6 +68,7 @@ uclinux_resolve_paths() {
     LABS_DIR="$WORK_ROOT/labs"
     DOCS_DIR="$WORK_ROOT/documents"
     LOG_DIR="$WORK_ROOT/logs"
+    STATE_DIR="$WORK_ROOT/.setup_validate_state"
 }
 
 uclinux_begin_logging() {
@@ -78,7 +79,7 @@ uclinux_begin_logging() {
     MAIN_LOG="${MAIN_LOG:-$LOG_DIR/$prefix-$TIMESTAMP.log}"
     REPORT="${REPORT:-$LOG_DIR/report-$TIMESTAMP.txt}"
 
-    mkdir -p "$LOG_DIR"
+    mkdir -p "$LOG_DIR" "$STATE_DIR"
 
     if [[ "${UCLINUX_LOGGING_STARTED:-0}" -eq 0 ]]; then
         exec 3>&1
