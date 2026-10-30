@@ -29,3 +29,7 @@ same-branch changes to kernel patches or configuration fragments.
 On driver-course branches, `driver.sh build` calls the same preparation
 function before applying the selected lab profile. Inspection commands never
 reset the output. Driver sources remain in the separate student repository.
+
+A branch reset drops Buildroot's remembered external package tree unless
+`BR2_EXTERNAL` is supplied explicitly. On an unchanged branch, its remembered
+external tree and package selections remain available.
