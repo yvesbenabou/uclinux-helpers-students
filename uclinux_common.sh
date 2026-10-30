@@ -265,6 +265,54 @@ uclinux_require_buildroot() {
     fi
 }
 
+# Each target output belongs to the last helpers branch prepared here.
+# A branch change discards generated target files, not the toolchain/cache.
+uclinux_prepare_buildroot() {
+    local target=$1
+    local out branch marker
+    local -a clean_packages=(linux-dirclean busybox-dirclean)
+
+    case "$target" in
+        stm32) out="$STM32_OUT" ;;
+        qemu) out="$QEMU_OUT" ;;
+        *) die "cible inconnue : $target" ;;
+    esac
+    uclinux_require_buildroot
+    branch="$(git -C "$SCRIPT_DIR" symbolic-ref --quiet --short HEAD \
+        || git -C "$SCRIPT_DIR" rev-parse HEAD)"
+    marker="$out/.helpers-branch"
+    if [[ -s "$out/.config" && -s "$marker" && "$(<"$marker")" == "$branch" ]]; then
+        ok "configuration $target conservée pour la branche $branch"
+        return 0
+    fi
+
+    # Never reset generated directories through a user-supplied symlink.
+    [[ ! -L "$out" && ! -L "$out/build" && ! -L "$out/target" \
+        && ! -L "$out/images" && ! -L "$out/build/buildroot-fs" \
+        && ! -L "$marker" ]] || die "sortie $target : lien symbolique incompatible avec le reset"
+    info "préparation $target pour $branch : reset Linux, BusyBox, target/ et images/"
+    mkdir -p "$out"
+    rm -f -- "$marker"
+    "uclinux_generate_${target}_config"
+    if grep -Fqx 'BR2_TARGET_UBOOT=y' "$out/.config"; then
+        clean_packages+=(uboot-dirclean)
+    fi
+    run_with_log "$LOG_DIR/reset-$target-$TIMESTAMP.log" \
+        make_br "$out" "${clean_packages[@]}"
+
+    # Removing target/ alone leaves Buildroot believing packages are installed.
+    # Reconfigure target packages to refresh their file-accounting snapshots,
+    # then reinstall. Keep host-package stamps and all other package sources.
+    find "$out/build" -mindepth 2 -maxdepth 2 -type f \
+        ! -path "$out/build/host-*/*" \
+        \( -name .stamp_configured -o -name .stamp_target_installed \
+            -o -name .stamp_images_installed \) -delete
+    rm -rf -- "$out/target" "$out/images" "$out/build/buildroot-fs"
+
+    # Preparation is complete. A failed compilation can now resume incrementally.
+    printf '%s\n' "$branch" >"$marker"
+}
+
 uclinux_enable_host_environment_setup() {
     local out=$1
     local config="$out/.config"

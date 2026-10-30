@@ -203,18 +203,8 @@ append_word() {
 }
 
 ensure_base_config() {
-    uclinux_require_buildroot
-    mkdir -p "$OUT" "$MANAGED_DIR"
-    if [[ -s "$OUT/.config" ]]; then
-        ok "configuration Buildroot existante : $OUT/.config"
-        return 0
-    fi
-
-    if [[ "$TARGET" == qemu ]]; then
-        uclinux_generate_qemu_config
-    else
-        uclinux_generate_stm32_config
-    fi
+    uclinux_prepare_buildroot "$TARGET"
+    mkdir -p "$MANAGED_DIR"
 }
 
 write_active_kernel_fragment() {
