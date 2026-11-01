@@ -9,6 +9,12 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=uclinux_common.sh
 source "$SCRIPT_DIR/uclinux_common.sh"
 
+# Preserve Buildroot's remembered tree unless explicitly overridden.
+UCLINUX_BR2_EXTERNAL_SET=0
+if [[ ${BR2_EXTERNAL+x} ]]; then
+    UCLINUX_BR2_EXTERNAL_SET=1
+fi
+
 linux_build_dir() {
     local __fn="${FUNCNAME[0]}"
     local out=$1
@@ -43,6 +49,9 @@ uclinux_step_build_stm32() {
     uclinux_prepare_buildroot stm32
 
     section "Construction incrémentale STM32F429I-DISC1"
+    if [[ "$UCLINUX_BR2_EXTERNAL_SET" == 1 && -z "${BR2_EXTERNAL-}" ]]; then
+        warn "BR2_EXTERNAL détaché explicitement ; les fichiers de paquets déjà installés peuvent rester dans target/ jusqu'à un build propre"
+    fi
     run_with_log "$LOG_DIR/build-stm32-$TIMESTAMP.log" make_br "$STM32_OUT"
 
     STALE_AFBOOT_IMAGES=(
@@ -173,9 +182,16 @@ Utilisation :
 
 Options :
   --root CHEMIN   Racine de travail, défaut : $UCLINUX_ROOT ou $HOME/uclinux
+  --br2-external CHEMIN   Arbre(s) BR2_EXTERNAL, prioritaire sur l'environnement
   --quiet         Masquer la sortie verbeuse des commandes longues
   --debug         Tracer l'entrée et la sortie des fonctions
   -h, --help      Afficher cette aide
+
+La variable d'environnement BR2_EXTERNAL est aussi acceptée. Sans option ni
+variable, Buildroot réutilise la valeur mémorisée sur une branche inchangée.
+Un changement de branche efface ce choix sauf s'il est fourni explicitement.
+Une liste de chemins peut être séparée par des deux-points. Une valeur vide
+explicite détache les arbres externes, mais ne désinstalle pas leurs fichiers.
 USAGE
 }
 
@@ -184,6 +200,12 @@ while (($#)); do
         --root)
             [[ $# -ge 2 ]] || { echo "ERREUR : --root attend un chemin." >&2; exit 2; }
             WORK_ROOT=$2
+            shift 2
+            ;;
+        --br2-external)
+            [[ $# -ge 2 ]] || { echo "ERREUR : --br2-external attend un chemin (ou une chaîne vide)." >&2; exit 2; }
+            BR2_EXTERNAL=$2
+            UCLINUX_BR2_EXTERNAL_SET=1
             shift 2
             ;;
         --quiet) QUIET=1; shift ;;
