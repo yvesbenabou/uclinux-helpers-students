@@ -80,6 +80,8 @@ and STM32 boot/flash scripts are unchanged.
 
 ## Switching helpers branches
 
+[Guide des branches, commandes et renommage des anciens noms](BRANCHES.md).
+
 
 Each target output records its prepared Git branch in `.helpers-branch`, for
 example `~/uclinux/outputs/stm32/.helpers-branch`. Setup (step 2) and builds
