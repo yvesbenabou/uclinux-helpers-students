@@ -3,9 +3,24 @@
 ## QEMU: embedded initramfs
 
 QEMU still emulates ARM VExpress, not the STM32 board. On this branch it
-boots Linux directly, with the Buildroot root filesystem embedded in
+boots U-Boot, then Linux, with the Buildroot root filesystem embedded in
 `images/zImage`. No SD root disk or external initrd is needed. `rootfs.cpio`
 is the archive used by Buildroot to regenerate the kernel image.
+
+QEMU builds U-Boot 2025.07 for `vexpress_ca9x4`, not the STM32 binary. QEMU
+preloads `zImage` at `0x62000000` and the Linux DTB at `0x63000000` into RAM.
+The readable `qemu/uboot.fragment` sets a three-second interruptible countdown
+and the default boot command:
+
+```sh
+setenv bootargs console=ttyAMA0,115200
+bootz 0x62000000 - 0x63000000
+```
+
+Here `-` means no separate initrd: it is already embedded in the kernel.
+U-Boot does not load these files from a disk in this first exercise, and its
+environment is not persistent (`saveenv` is not provided). The STM32 U-Boot
+configuration, Flash addresses and environment remain separate and unchanged.
 
 ```sh
 ./3_uclinux_qemu_dl_and_build.sh --quiet
