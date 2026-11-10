@@ -101,12 +101,10 @@ IMAGES_DIR="$QEMU_OUT/images"
 
 KERNEL="$IMAGES_DIR/zImage"
 DTB="$IMAGES_DIR/vexpress-v2p-ca9.dtb"
-ROOTFS="$IMAGES_DIR/rootfs.ext2"
 START_QEMU="$IMAGES_DIR/start-qemu.sh"
 
 check_file_nonempty "$KERNEL"
 check_file_nonempty "$DTB"
-check_file_nonempty "$ROOTFS"
 check_file_nonempty "$START_QEMU"
 
 QEMU_BIN="$QEMU_OUT/host/bin/qemu-system-arm"
