@@ -29,6 +29,8 @@ headroom and rejects overlap with the end of Flash.
 
 ## Switching helpers branches
 
+[Guide des branches, commandes et renommage des anciens noms](BRANCHES.md).
+
 
 Each target output records its prepared Git branch in `.helpers-branch`, for
 example `~/uclinux/outputs/stm32/.helpers-branch`. Setup (step 2) and builds
