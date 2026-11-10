@@ -102,6 +102,8 @@ IMAGES_DIR="$QEMU_OUT/images"
 KERNEL="$IMAGES_DIR/zImage"
 DTB="$IMAGES_DIR/vexpress-v2p-ca9.dtb"
 START_QEMU="$IMAGES_DIR/start-qemu.sh"
+# Same launch path as before, but qemu/post_image.sh installs the helpers-owned
+# replacement here instead of Buildroot's board/qemu/post-image.sh generator.
 
 check_file_nonempty "$KERNEL"
 check_file_nonempty "$DTB"
