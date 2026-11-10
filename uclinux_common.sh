@@ -452,6 +452,12 @@ uclinux_generate_qemu_config() {
     # complétée par Kconfig en  BR2_ARCH="arm" BR2_ARM_CPU_ARMV7A=y BR2_cortex_a9=y BR2_ARM_EABIHF=y BR2_TOOLCHAIN_BUILDROOT=y BR2_TOOLCHAIN_BUILDROOT_GLIBC=y BR2_GCC_VERSION="14.3.0" BR2_BINUTILS_VERSION="2.43.1"
 
     run_with_log "$LOG_DIR/defconfig-qemu-$TIMESTAMP.log" make_br "$QEMU_OUT" qemu_arm_vexpress_defconfig
+    # Match this branch's initramfs on QEMU, without changing its virtual board.
+    run_with_log "$LOG_DIR/config-qemu-$TIMESTAMP.log" \
+        "$BUILDROOT_DIR/utils/config" --file "$QEMU_OUT/.config" \
+        --disable BR2_TARGET_ROOTFS_EXT2 --enable BR2_TARGET_ROOTFS_INITRAMFS \
+        --set-str BR2_ROOTFS_POST_IMAGE_SCRIPT "$SCRIPT_DIR/qemu/post_image.sh"
+    run_with_log "$LOG_DIR/olddefconfig-qemu-$TIMESTAMP.log" make_br "$QEMU_OUT" olddefconfig
     check_file_nonempty "$QEMU_OUT/.config"
     grep -Fqx 'BR2_cortex_a9=y' "$QEMU_OUT/.config"
     uclinux_enable_host_environment_setup "$QEMU_OUT"

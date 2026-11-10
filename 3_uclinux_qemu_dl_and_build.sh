@@ -31,8 +31,15 @@ uclinux_step_build_qemu() {
     QEMU_IMAGES=(
         "$QEMU_OUT/images/zImage"
         "$QEMU_OUT/images/vexpress-v2p-ca9.dtb"
-        "$QEMU_OUT/images/rootfs.ext2"
     )
+    if grep -qx 'BR2_TARGET_ROOTFS_INITRAMFS=y' "$QEMU_OUT/.config"; then
+        QEMU_IMAGES+=("$QEMU_OUT/images/rootfs.cpio")
+    else
+        QEMU_IMAGES+=("$QEMU_OUT/images/rootfs.ext2")
+    fi
+    if grep -qx 'BR2_TARGET_UBOOT=y' "$QEMU_OUT/.config"; then
+        QEMU_IMAGES+=("$QEMU_OUT/images/u-boot.bin")
+    fi
     for image in "${QEMU_IMAGES[@]}"; do check_file_nonempty "$image"; done
     check_file_nonempty "$QEMU_OUT/host/bin/qemu-system-arm"
     file "$QEMU_OUT/host/bin/qemu-system-arm"

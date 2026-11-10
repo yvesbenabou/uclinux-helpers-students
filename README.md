@@ -1,5 +1,27 @@
 
 
+## QEMU: embedded initramfs
+
+QEMU still emulates ARM VExpress, not the STM32 board. On this branch it
+boots Linux directly, with the Buildroot root filesystem embedded in
+`images/zImage`. No SD root disk or external initrd is needed. `rootfs.cpio`
+is the archive used by Buildroot to regenerate the kernel image.
+
+```sh
+./3_uclinux_qemu_dl_and_build.sh --quiet
+./run_qemu_image.sh
+```
+
+The tracked `qemu/start-qemu.sh` is installed into `images/` by the post-image
+hook. It reads the effective Buildroot `.config`; it does not guess the boot
+mode from leftover image files. Changing target files requires a complete
+Buildroot `make` (script 3), not just compiling Linux.
+
+For an output prepared on this same branch before this change, back up any
+custom configuration, then remove **only** `~/uclinux/outputs/qemu/.config`
+once and run script 3. This invokes the normal QEMU-only reset. STM32 outputs
+and STM32 boot/flash scripts are unchanged.
+
 ## Switching helpers branches
 
 
