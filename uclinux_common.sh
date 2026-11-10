@@ -489,6 +489,17 @@ uclinux_generate_qemu_config() {
     # complétée par Kconfig en  BR2_ARCH="arm" BR2_ARM_CPU_ARMV7A=y BR2_cortex_a9=y BR2_ARM_EABIHF=y BR2_TOOLCHAIN_BUILDROOT=y BR2_TOOLCHAIN_BUILDROOT_GLIBC=y BR2_GCC_VERSION="14.3.0" BR2_BINUTILS_VERSION="2.43.1"
 
     run_with_log "$LOG_DIR/defconfig-qemu-$TIMESTAMP.log" make_br "$QEMU_OUT" qemu_arm_vexpress_defconfig
+    # QEMU uses U-Boot on this branch; keep its existing ext2 root disk.
+    run_with_log "$LOG_DIR/config-qemu-$TIMESTAMP.log" \
+        "$BUILDROOT_DIR/utils/config" --file "$QEMU_OUT/.config" \
+        --set-str BR2_ROOTFS_POST_IMAGE_SCRIPT "$SCRIPT_DIR/qemu/post_image.sh" \
+        --enable BR2_TARGET_UBOOT --enable BR2_TARGET_UBOOT_LATEST_VERSION \
+        --enable BR2_TARGET_UBOOT_USE_DEFCONFIG \
+        --set-str BR2_TARGET_UBOOT_BOARD_DEFCONFIG vexpress_ca9x4 \
+        --set-str BR2_TARGET_UBOOT_CONFIG_FRAGMENT_FILES "$SCRIPT_DIR/qemu/uboot.fragment" \
+        --enable BR2_TARGET_UBOOT_FORMAT_BIN \
+        --enable BR2_TARGET_UBOOT_NEEDS_DTC --enable BR2_TARGET_UBOOT_NEEDS_OPENSSL
+    run_with_log "$LOG_DIR/olddefconfig-qemu-$TIMESTAMP.log" make_br "$QEMU_OUT" olddefconfig
     check_file_nonempty "$QEMU_OUT/.config"
     grep -Fqx 'BR2_cortex_a9=y' "$QEMU_OUT/.config"
     uclinux_enable_host_environment_setup "$QEMU_OUT"

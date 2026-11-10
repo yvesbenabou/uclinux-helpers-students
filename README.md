@@ -1,5 +1,40 @@
 
 
+## QEMU: U-Boot and ext2
+
+QEMU still emulates ARM VExpress, not the STM32 board. On this branch it
+boots U-Boot, then Linux, with the existing `rootfs.ext2` SD root disk.
+ROMFS is deliberately STM32-only; the QEMU root filesystem remains ext2.
+
+QEMU builds U-Boot 2025.07 for `vexpress_ca9x4`, not the STM32 binary. It
+preloads `zImage` at `0x62000000` and the Linux DTB at `0x63000000` into RAM.
+The readable `qemu/uboot.fragment` sets a three-second interruptible countdown
+and the default boot command:
+
+```sh
+setenv bootargs console=ttyAMA0,115200 rootwait root=/dev/mmcblk0
+bootz 0x62000000 - 0x63000000
+```
+
+U-Boot does not load these files from the SD card in this first exercise,
+and its environment is not persistent (`saveenv` is not provided). The STM32
+U-Boot configuration, Flash addresses and environment remain unchanged.
+
+```sh
+./3_uclinux_qemu_dl_and_build.sh --quiet
+./run_qemu_image.sh
+```
+
+The tracked `qemu/start-qemu.sh` is installed into `images/` by the post-image
+hook. It reads the effective Buildroot `.config`; it does not guess the boot
+mode from leftover image files. Changing target files requires a complete
+Buildroot `make` (script 3), not just compiling Linux.
+
+For an output prepared on this same branch before this change, back up any
+custom configuration, then remove **only** `~/uclinux/outputs/qemu/.config`
+once and run script 3. This invokes the normal QEMU-only reset. STM32 outputs
+and STM32 boot/flash scripts are unchanged.
+
 ## Switching helpers branches
 
 

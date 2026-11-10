@@ -1,0 +1,13 @@
+# VExpress QEMU: RAM preload addresses match start-qemu.sh.
+# -bios executes the binary from the board's flash alias at address zero.
+CONFIG_TEXT_BASE=0x00000000
+CONFIG_BAUDRATE=115200
+CONFIG_BOOTDELAY=3
+CONFIG_CMD_BOOTZ=y
+CONFIG_USE_BOOTCOMMAND=y
+CONFIG_BOOTCOMMAND="setenv bootargs console=ttyAMA0,115200 rootwait root=/dev/mmcblk0; bootz 0x62000000 - 0x63000000"
+# This exercise does not emulate persistent environment storage.
+# CONFIG_ENV_IS_IN_FLASH is not set
+CONFIG_ENV_IS_NOWHERE=y
+# EFI firmware capsules are outside this boot exercise (no host GnuTLS needed).
+# CONFIG_TOOLS_MKEFICAPSULE is not set
