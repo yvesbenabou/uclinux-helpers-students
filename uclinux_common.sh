@@ -303,9 +303,11 @@ uclinux_drop_legacy_linux_override() {
     warn "suppression de l'ancien override helpers ; Linux sera réextrait et patché"
     # Invalidate first: an interrupted migration must not reuse the old build.
     rm -f -- "$out/.helpers-branch"
-    BR2_EXTERNAL="${BR2_EXTERNAL-}" run_with_log "$LOG_DIR/retire-linux-override-$TIMESTAMP.log" \
-        make_br "$out" linux-dirclean
-    sed -i '/^LINUX_OVERRIDE_SRCDIR[[:space:]]*=/d' "$out/local.mk"
+    # This is the generated rsync copy, not the source clone. Removing it
+    # directly also works without .config, when make linux-dirclean cannot run.
+    rm -rf -- "$out/build/linux-custom"
+    sed -i '/^LINUX_OVERRIDE_SRCDIR[[:space:]]*=/d' "$out/local.mk" \
+        || die "impossible de retirer l'ancien override dans $out/local.mk"
 }
 
 # Each target output belongs to the last helpers branch prepared here.
