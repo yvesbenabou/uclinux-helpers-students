@@ -62,6 +62,23 @@ On driver-course branches, `driver.sh build` calls the same preparation
 function before applying the selected lab profile. Inspection commands never
 reset the output. Driver sources remain in the separate student repository.
 
+Older helpers cloned Linux into `~/uclinux/linux-<version>` and wrote a
+`LINUX_OVERRIDE_SRCDIR` assignment in each output's `local.mk`. Such an override
+skips Buildroot's normal patch phase, including the course framebuffer patches.
+Preparation now removes only the exact legacy helpers assignment and triggers
+the normal reset once, even on an unchanged branch. The source clone and other
+`local.mk` settings are preserved. An unrecognized Linux override stops the
+build with an explanation rather than silently changing user settings.
+
+Locating an extracted kernel only reads `build/linux-*`: Linux headers are
+excluded, kernel source files are checked, and multiple candidates cause an
+error. Before extraction, no candidate is normal; after a build, exactly one
+is required. This lookup never calls `make printvars` or rewrites
+`.br2-external.mk`, and is not a substitute for applying patches.
+
+Run the isolated Bash regression tests with `bash tests/test-linux-sources.sh`.
+They do not download or build packages and do not touch existing outputs.
+
 A branch reset drops Buildroot's remembered external package tree unless
 `BR2_EXTERNAL` is supplied explicitly. On an unchanged branch, its remembered
 external tree and package selections remain available.
