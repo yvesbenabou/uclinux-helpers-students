@@ -15,18 +15,6 @@ if [[ ${BR2_EXTERNAL+x} ]]; then
     UCLINUX_BR2_EXTERNAL_SET=1
 fi
 
-linux_build_dir() {
-    local __fn="${FUNCNAME[0]}"
-    local out=$1
-    local version=$2
-    local dir="$out/build/linux-$version"
-
-    debug_enter "$__fn"
-    [[ -d "$dir" ]] || die "répertoire de build Linux introuvable : $dir"
-    printf '%s\n' "$dir"
-    debug_exit "$__fn" 0
-}
-
 uclinux_reconcile_stm32_images() {
     local stale_image
 
@@ -65,7 +53,9 @@ uclinux_step_build_stm32() {
     )
     for image in "${STM32_IMAGES[@]}"; do check_file_nonempty "$image"; done
 
-    LINUX_BUILD_DIR="$(linux_build_dir "$STM32_OUT" "$EXPECTED_LINUX_VERSION")"
+    LINUX_BUILD_DIR="$(uclinux_linux_build_dir "$WORK_ROOT" "$STM32_OUT")" \
+        || die "impossible de déterminer le répertoire de build Linux"
+    [[ -d "$LINUX_BUILD_DIR" ]] || die "répertoire de build Linux introuvable : $LINUX_BUILD_DIR"
     VMLINUX="$LINUX_BUILD_DIR/vmlinux"
     KERNEL_CONFIG="$LINUX_BUILD_DIR/.config"
     check_file_nonempty "$VMLINUX"

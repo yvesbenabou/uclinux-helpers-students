@@ -88,15 +88,11 @@ find_unique_glob() {
 }
 
 find_linux_config() {
-    local br_config=$1
-    local version
-    local config
+    local dir config
 
-    version="$(config_value "$br_config" BR2_LINUX_KERNEL_VERSION)"
-    [[ -n "$version" ]] || version="$(config_value "$br_config" BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE)"
-    [[ -n "$version" ]] || die "version Linux absente de $br_config"
-
-    config="$STM32_OUT/build/linux-$version/.config"
+    dir="$(uclinux_linux_build_dir "$WORK_ROOT" "$STM32_OUT")" \
+        || die "impossible de déterminer le répertoire de build Linux"
+    config="$dir/.config"
     [[ -s "$config" ]] || die "configuration Linux construite introuvable : $config"
     printf '%s\n' "$config"
 }
@@ -263,7 +259,7 @@ if [[ "$MODE" == "flash" ]]; then
     BOOTLOADER_BASE="${BOOTLOADER_BASE%.bin}"
     AFBOOT_BUILD_DIR="$(find_unique_glob "$STM32_OUT/build/afboot-stm32-*" "répertoire de build afboot")"
     AFBOOT_LINKER_SCRIPT="$(afboot_linker_script "$AFBOOT_BUILD_DIR/Makefile" "$BOOTLOADER_BASE")"
-    LINUX_CONFIG="$(find_linux_config "$BR_CONFIG")"
+    LINUX_CONFIG="$(find_linux_config)"
     BOOTLOADER_ADDR="$(linker_flash_origin "$AFBOOT_LINKER_SCRIPT")"
     DTB_ADDR="$(normalize_address "$(require_config_value "$BR_CONFIG" BR2_TARGET_AFBOOT_STM32_DTB_ADDR)")"
     XIP_IMAGE_ADDR="$(normalize_address "$(require_config_value "$LINUX_CONFIG" CONFIG_XIP_PHYS_ADDR)")"
