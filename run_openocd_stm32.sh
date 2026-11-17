@@ -104,15 +104,11 @@ find_unique_glob() {
 }
 
 find_linux_config() {
-    local br_config=$1
-    local version
-    local config
+    local dir config
 
-    version="$(config_value "$br_config" BR2_LINUX_KERNEL_VERSION)"
-    [[ -n "$version" ]] || version="$(config_value "$br_config" BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE)"
-    [[ -n "$version" ]] || die "version Linux absente de $br_config"
-
-    config="$STM32_OUT/build/linux-$version/.config"
+    dir="$(uclinux_linux_build_dir "$WORK_ROOT" "$STM32_OUT")" \
+        || die "impossible de déterminer le répertoire de build Linux"
+    config="$dir/.config"
     [[ -s "$config" ]] || die "configuration Linux construite introuvable : $config"
     printf '%s\n' "$config"
 }
@@ -262,7 +258,7 @@ if [[ "$MODE" == "flash" ]]; then
     [[ "$(config_value "$UBOOT_CONFIG" CONFIG_ENV_SECT_SIZE)" == 0x20000 ]] \
         || die "taille du secteur d'environnement U-Boot incohérente."
 
-    LINUX_CONFIG="$(find_linux_config "$BR_CONFIG")"
+    LINUX_CONFIG="$(find_linux_config)"
     [[ "$(normalize_address "$(require_config_value "$LINUX_CONFIG" CONFIG_XIP_PHYS_ADDR)")" == "$STM32_XIP_ADDR" ]] \
         || die "adresse XIP Linux incohérente."
     DTB_ADDR="$(normalize_address "$STM32_DTB_ADDR")"
