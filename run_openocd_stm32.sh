@@ -106,7 +106,7 @@ find_unique_glob() {
 find_linux_config() {
     local dir config
 
-    dir="$(uclinux_linux_build_dir "$WORK_ROOT" "$STM32_OUT")" \
+    dir="$(uclinux_linux_build_dir "$STM32_OUT")" \
         || die "impossible de déterminer le répertoire de build Linux"
     config="$dir/.config"
     [[ -s "$config" ]] || die "configuration Linux construite introuvable : $config"
