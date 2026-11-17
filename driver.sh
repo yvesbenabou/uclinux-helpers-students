@@ -335,12 +335,9 @@ configure_buildroot() {
 }
 
 find_linux_dir() {
-    local version
     local candidate
 
-    version="$(br_config_value "$OUT/.config" BR2_LINUX_KERNEL_VERSION)"
-    [[ -n "$version" ]] || version="$(br_config_value "$OUT/.config" BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE)"
-    candidate="$OUT/build/linux-$version"
+    candidate="$(uclinux_linux_build_dir "$WORK_ROOT" "$OUT")" || return 1
     [[ -d "$candidate" ]] || return 1
     printf '%s\n' "$candidate"
 }
