@@ -70,14 +70,18 @@ uclinux_reconcile_stm32_images() {
 uclinux_step_build_stm32() {
     local asset_dir="$SCRIPT_DIR/stm32_romfs"
     local linux_inputs_state="$STATE_DIR/linux-stm32-inputs.sha256"
-    local linux_config
+    local linux_dir linux_config=""
     local previous_linux_inputs=""
     local package
 
     section "Préparation des sources Linux STM32"
     uclinux_prepare_buildroot stm32
-    linux_config="$(uclinux_linux_build_dir "$WORK_ROOT" "$STM32_OUT")/.config" \
-        || die "impossible de déterminer le répertoire de build Linux"
+    if linux_dir="$(uclinux_linux_build_dir "$STM32_OUT")"; then
+        linux_config="$linux_dir/.config"
+    else
+        [[ $? == 1 ]] || die "impossible de déterminer le répertoire de build Linux"
+        # No sources yet: the normal build will extract, patch and configure.
+    fi
 
     section "Construction incrémentale STM32F429I-DISC1"
     if [[ "$UCLINUX_BR2_EXTERNAL_SET" == 1 && -z "${BR2_EXTERNAL-}" ]]; then
@@ -93,9 +97,9 @@ uclinux_step_build_stm32() {
         && "$previous_linux_inputs" != "$STM32_LINUX_INPUTS_FINGERPRINT" ]]; then
         run_with_log "$LOG_DIR/dirclean-linux-stm32-$TIMESTAMP.log" \
             make_br "$STM32_OUT" linux-dirclean
-    elif [[ ! -s "$linux_config" ]] \
+    elif [[ -n "$linux_config" ]] && { [[ ! -s "$linux_config" ]] \
         || ! grep -qx 'CONFIG_SPI_STM32=y' "$linux_config" \
-        || ! grep -qx 'CONFIG_FB_STM32F429_DISCO_SIMPLE=y' "$linux_config"; then
+        || ! grep -qx 'CONFIG_FB_STM32F429_DISCO_SIMPLE=y' "$linux_config"; }; then
         run_with_log "$LOG_DIR/reconfigure-linux-stm32-$TIMESTAMP.log" \
             make_br "$STM32_OUT" linux-reconfigure
     fi
