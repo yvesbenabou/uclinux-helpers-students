@@ -218,20 +218,24 @@ make_br() {
     return "$rc"
 }
 
-# Ask Buildroot for the package directory: source overrides use linux-custom
-# independently of BR2_LINUX_KERNEL_VERSION and stale directories may coexist.
+# Read existing sources without invoking make or changing BR2_EXTERNAL state.
+# Return 1 before extraction, 2 on ambiguity. Never guess between old trees.
 uclinux_linux_build_dir() {
-    local root=$1 out=$2 output dir
-    local -a external_args=()
+    local out=$1 dir
+    local -a matches=()
 
-    if [[ "${UCLINUX_BR2_EXTERNAL_SET:-0}" == 1 ]]; then
-        external_args+=("BR2_EXTERNAL=${BR2_EXTERNAL-}")
-    fi
-    output="$(make -s --no-print-directory -C "$root/buildroot" "O=$out" \
-        "BR2_DL_DIR=$root/downloads" "${external_args[@]}" printvars VARS=LINUX_DIR)" || return 1
-    dir="$(printf '%s\n' "$output" | sed -n 's/^LINUX_DIR=//p')"
-    [[ -n "$dir" && "$dir" != *$'\n'* ]] || return 1
-    printf '%s\n' "$dir"
+    for dir in "$out"/build/linux-*; do
+        [[ "${dir##*/}" == linux-headers-* ]] && continue
+        [[ -f "$dir/Makefile" && -f "$dir/Kconfig" \
+            && -d "$dir/arch" && -d "$dir/drivers" ]] || continue
+        matches+=("$dir")
+    done
+    case "${#matches[@]}" in
+        0) return 1 ;;
+        1) printf '%s\n' "${matches[0]}" ;;
+        *) printf 'ERREUR : arbres Linux ambigus dans %s/build : %s\n' \
+               "$out" "${matches[*]}" >&2; return 2 ;;
+    esac
 }
 
 br_config_value() {
@@ -276,6 +280,30 @@ uclinux_require_buildroot() {
     fi
 }
 
+# Old helpers wrote this exact override to a cloned kernel. It skips Buildroot's
+# patch phase, so retire it before the normal branch reset. Keep the clone and
+# every unrelated local.mk setting; refuse overrides we do not own.
+uclinux_drop_legacy_linux_override() {
+    local out=$1 override version
+    local prefix="LINUX_OVERRIDE_SRCDIR = $WORK_ROOT/linux-"
+
+    [[ -f "$out/local.mk" ]] || return 0
+    override="$(sed -n '/^[[:space:]]*LINUX_OVERRIDE_SRCDIR[[:space:]]*[:?+!]*=/p' "$out/local.mk")"
+    [[ -n "$override" ]] || return 0
+    version="${override#"$prefix"}"
+    [[ "$override" == "$prefix"* && "$version" =~ ^[0-9]+(\.[0-9]+)+$ ]] \
+        || die "override Linux non reconnu dans $out/local.mk : retirez-le explicitement pour utiliser les patches du cours"
+    [[ ! -L "$out" && ! -L "$out/build" && ! -L "$out/local.mk" \
+        && ! -L "$out/.helpers-branch" ]] || die "migration Linux : lien symbolique incompatible"
+
+    warn "suppression de l'ancien override helpers ; Linux sera réextrait et patché"
+    # Invalidate first: an interrupted migration must not reuse the old build.
+    rm -f -- "$out/.helpers-branch"
+    BR2_EXTERNAL="${BR2_EXTERNAL-}" run_with_log "$LOG_DIR/retire-linux-override-$TIMESTAMP.log" \
+        make_br "$out" linux-dirclean
+    sed -i '/^LINUX_OVERRIDE_SRCDIR[[:space:]]*=/d' "$out/local.mk"
+}
+
 # Each target output belongs to the last helpers branch prepared here.
 # A branch change discards generated target files, not the toolchain/cache.
 uclinux_prepare_buildroot() {
@@ -292,6 +320,7 @@ uclinux_prepare_buildroot() {
     branch="$(git -C "$SCRIPT_DIR" symbolic-ref --quiet --short HEAD \
         || git -C "$SCRIPT_DIR" rev-parse HEAD)"
     marker="$out/.helpers-branch"
+    uclinux_drop_legacy_linux_override "$out"
     if [[ -s "$out/.config" && -s "$marker" && "$(<"$marker")" == "$branch" ]]; then
         ok "configuration $target conservée pour la branche $branch"
         return 0
