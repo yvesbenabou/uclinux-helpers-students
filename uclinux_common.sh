@@ -222,6 +222,22 @@ make_br() {
     return "$rc"
 }
 
+# Ask Buildroot for the package directory: source overrides use linux-custom
+# independently of BR2_LINUX_KERNEL_VERSION and stale directories may coexist.
+uclinux_linux_build_dir() {
+    local root=$1 out=$2 output dir
+    local -a external_args=()
+
+    if [[ "${UCLINUX_BR2_EXTERNAL_SET:-0}" == 1 ]]; then
+        external_args+=("BR2_EXTERNAL=${BR2_EXTERNAL-}")
+    fi
+    output="$(make -s --no-print-directory -C "$root/buildroot" "O=$out" \
+        "BR2_DL_DIR=$root/downloads" "${external_args[@]}" printvars VARS=LINUX_DIR)" || return 1
+    dir="$(printf '%s\n' "$output" | sed -n 's/^LINUX_DIR=//p')"
+    [[ -n "$dir" && "$dir" != *$'\n'* ]] || return 1
+    printf '%s\n' "$dir"
+}
+
 br_config_value() {
     local __fn="${FUNCNAME[0]}"
     local config=$1
