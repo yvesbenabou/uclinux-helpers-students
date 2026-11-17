@@ -67,20 +67,8 @@ uclinux_generate_qemu_config() {
     printf 'BR2_LINUX_KERNEL_VERSION="6.12.27"\n' >"$QEMU_OUT/.config"
 }
 make_br() {
-    local out=$1
     shift
     printf 'make %s\n' "$*" >>"$test_root/calls"
-    if [[ "$*" == linux-dirclean ]]; then
-        [[ ${MOCK_CLEAN_FAIL:-0} == 0 ]] || return 33
-        # Legacy clean must happen before its override is removed, without
-        # inheriting a missing BR2_EXTERNAL from the previous branch.
-        grep -q '^LINUX_OVERRIDE_SRCDIR = ' "$out/local.mk"
-        [[ ${BR2_EXTERNAL+x} ]]
-        [[ ! -e "$out/.helpers-branch" ]]
-        if [[ -d "$out/build/linux-custom" ]]; then
-            mv "$out/build/linux-custom" "$test_root/retired-custom"
-        fi
-    fi
 }
 printf 'configured\n' >"$STM32_OUT/.config"
 printf '%s\n' "$branch" >"$STM32_OUT/.helpers-branch"
@@ -100,7 +88,7 @@ uclinux_prepare_buildroot stm32
 grep -qx 'OTHER_OVERRIDE_SRCDIR = /keep' "$STM32_OUT/local.mk"
 ! grep -q '^LINUX_OVERRIDE_SRCDIR' "$STM32_OUT/local.mk"
 [[ -f "$WORK_ROOT/linux-6.1.133/student-change.c" ]]
-[[ -d "$test_root/retired-custom" && ! -e "$STM32_OUT/target" ]]
+[[ ! -e "$STM32_OUT/build/linux-custom" && ! -e "$STM32_OUT/target" ]]
 [[ -f "$STM32_OUT/build/host-tool/.stamp_configured" ]]
 [[ ! -f "$STM32_OUT/build/target-tool/.stamp_configured" ]]
 [[ "$(<"$STM32_OUT/.helpers-branch")" == "$branch" ]]
@@ -112,12 +100,16 @@ printf 'PASS: same-branch migration, clone/settings preserved, reset only once\n
 # Missing .config is normal after a manual reset; interruption must be resumable.
 printf 'LINUX_OVERRIDE_SRCDIR = %s/linux-6.12.27\n' "$WORK_ROOT" >"$QEMU_OUT/local.mk"
 printf '%s\n' "$branch" >"$QEMU_OUT/.helpers-branch"
-MOCK_CLEAN_FAIL=1
+sed() {
+    if [[ "$1" == -i && ${MOCK_EDIT_FAIL:-0} == 1 ]]; then return 33; fi
+    command sed "$@"
+}
+MOCK_EDIT_FAIL=1
 prepare_qemu() ( uclinux_prepare_buildroot qemu; )
 expect_status 61 prepare_qemu
 grep -q '^LINUX_OVERRIDE_SRCDIR = ' "$QEMU_OUT/local.mk"
 [[ ! -e "$QEMU_OUT/.helpers-branch" ]]
-MOCK_CLEAN_FAIL=0
+MOCK_EDIT_FAIL=0
 uclinux_prepare_buildroot qemu
 [[ -f "$QEMU_OUT/.config" ]]
 ! grep -q '^LINUX_OVERRIDE_SRCDIR' "$QEMU_OUT/local.mk"
