@@ -337,7 +337,7 @@ configure_buildroot() {
 find_linux_dir() {
     local candidate
 
-    candidate="$(uclinux_linux_build_dir "$WORK_ROOT" "$OUT")" || return 1
+    candidate="$(uclinux_linux_build_dir "$OUT")" || return $?
     [[ -d "$candidate" ]] || return 1
     printf '%s\n' "$candidate"
 }
