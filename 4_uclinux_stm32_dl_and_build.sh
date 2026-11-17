@@ -85,7 +85,7 @@ uclinux_step_build_stm32() {
     )
     for image in "${STM32_IMAGES[@]}"; do check_file_nonempty "$image"; done
 
-    LINUX_BUILD_DIR="$(uclinux_linux_build_dir "$WORK_ROOT" "$STM32_OUT")" \
+    LINUX_BUILD_DIR="$(uclinux_linux_build_dir "$STM32_OUT")" \
         || die "impossible de déterminer le répertoire de build Linux"
     [[ -d "$LINUX_BUILD_DIR" ]] || die "répertoire de build Linux introuvable : $LINUX_BUILD_DIR"
     VMLINUX="$LINUX_BUILD_DIR/vmlinux"
