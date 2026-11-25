@@ -137,11 +137,11 @@ uclinux_step_setup_validation() {
     done
     ok "outils fondamentaux présents"
 
-    printf 'gcc       : '; gcc --version | head -n1
-    printf 'make      : '; make --version | head -n1
-    printf 'git       : '; git --version
-    printf 'DTC       : '; dtc --version
-    printf 'Minicom   : '; minicom --version | head -n1
+    printf 'gcc       : '; gcc --version 2>&1 | head -n1 || true
+    printf 'make      : '; make --version 2>&1 | head -n1 || true
+    printf 'git       : '; git --version 2>&1 || true
+    printf 'DTC       : '; dtc --version 2>&1 || true
+    printf 'Minicom   : '; minicom --version 2>&1 | head -n1 || true
     MINICOM_PROFILE="$(create_minicom_acm0_profile)"
     ok "profil minicom créé : minicom acm0 -> /dev/ttyACM0, 115200 8N1 ($MINICOM_PROFILE)"
     configure_serial_access
